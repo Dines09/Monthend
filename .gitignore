@@ -1,0 +1,6 @@
+node_modules
+dist
+verify_out
+smoke_dl
+*.log
+.DS_Store
