@@ -1,6 +1,6 @@
-import { h, topbar, screen, numInput, toast } from "../ui";
+import { h, topbar, screen, numInput, toast, segmented, progressRing, achievement, helpTip, longPress } from "../ui";
 import { db, type IccpDaily } from "../db";
-import { isoDate, defaultReportYm, ymParts, debounce, parseIso } from "../util";
+import { isoDate, defaultReportYm, ymParts, debounce, parseIso, saturdaysInMonth, slipringDefault } from "../util";
 import { monthPicker, toolbar } from "./parts";
 
 const AREAS = ["Sea", "Port", "Anchor"];
@@ -18,15 +18,20 @@ MGPS["P/S"] = MGPS.P;
 // Ship is stationary at Port/Anchor -> shaft is not turning -> shaft potential is 0.
 const STATIONARY = new Set(["Port", "Anchor"]);
 
+// Today's readings the user actually enters (excludes auto-filled fields).
+const READING_KEYS: (keyof IccpDaily)[] = ["draft", "seaTemp", "amp", "volt", "cell1", "cell2"];
+
 export async function renderIccp(_p: Record<string, string>, mount: HTMLElement) {
   const today = new Date();
-  let curYm = isoDate(today).startsWith(defaultReportYm()) ? defaultReportYm() : `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
   // default to current month for daily entry
-  curYm = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+  let curYm = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
   let selDate = isoDate(today);
+  let editingMgps = false;
+  let lastComplete = false;
 
-  const daySelect = h("select", {});
+  const daySelect = h("select", { class: "dayselect" });
   const form = h("div", {});
+  const ringWrap = h("div", {});
   const monthlyBtn = h("button", { class: "btn ghost", style: { marginTop: "16px" }, onClick: () => openMonthly(curYm) }, "Monthly footer (observations, slipring, remark)");
 
   function rebuildDays() {
@@ -40,15 +45,36 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
     if (!selDate.startsWith(curYm)) { selDate = `${curYm}-01`; daySelect.value = selDate; }
   }
 
+  // Count of today's reading fields already filled (for the progress ring).
+  function progressOf(saved: IccpDaily | undefined): { done: number; total: number } {
+    const area = saved?.area ?? "Sea";
+    const stationary = STATIONARY.has(area);
+    const keys = stationary ? READING_KEYS : [...READING_KEYS, "shaftMv" as keyof IccpDaily];
+    const done = keys.filter((k) => saved?.[k] != null).length;
+    return { done, total: keys.length };
+  }
+
+  async function refreshRing(fireOnComplete: boolean) {
+    const saved = await db.iccpDaily.get(selDate);
+    const { done, total } = progressOf(saved);
+    ringWrap.replaceChildren(progressRing(done, total, "left"));
+    const complete = total > 0 && done >= total;
+    if (fireOnComplete && complete && !lastComplete) {
+      const n = Number(selDate.slice(-2));
+      achievement("Daily reading complete!", `ICCP / MGPS saved for Day ${n}`);
+    }
+    lastComplete = complete;
+  }
+
   async function loadDay() {
+    editingMgps = false;
     const saved = await db.iccpDaily.get(selDate);
     const prevDate = isoDate(new Date(parseIso(selDate).getTime() - 86400000));
     const prev = await db.iccpDaily.get(prevDate);
 
-    // Effective values shown to the user: saved value first, else carried
-    // forward from the previous day, else a sensible default. These "guessed"
-    // slow-changing fields are persisted so exports have them without the user
-    // re-entering anything each day.
+    // Effective values shown to the user: saved first, else carried forward from
+    // the previous day, else a sensible default. Slow-changing fields (incl. the
+    // MGPS readings) carry forward so an edit "sticks" as the new daily normal.
     const area = saved?.area ?? prev?.area ?? "Sea";
     const seaChest = saved?.seaChest ?? prev?.seaChest ?? "S";
     const draft = saved?.draft ?? prev?.draft ?? null;
@@ -60,10 +86,10 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
       area,
       seaChest,
       draft: draft ?? undefined,
-      cu1: saved?.cu1 ?? mgps.cu1,
-      al1: saved?.al1 ?? mgps.al1,
-      cu2: saved?.cu2 ?? mgps.cu2,
-      al2: saved?.al2 ?? mgps.al2,
+      cu1: saved?.cu1 ?? prev?.cu1 ?? mgps.cu1,
+      al1: saved?.al1 ?? prev?.al1 ?? mgps.al1,
+      cu2: saved?.cu2 ?? prev?.cu2 ?? mgps.cu2,
+      al2: saved?.al2 ?? prev?.al2 ?? mgps.al2,
       shaftMv: stationary ? 0 : saved?.shaftMv,
       seaTemp: saved?.seaTemp,
       amp: saved?.amp,
@@ -72,8 +98,8 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
       cell2: saved?.cell2,
     };
 
-    // Persist the auto-filled slow-changing fields on first visit / when they
-    // were just derived (so a day the user only glances at still exports right).
+    // Persist auto-filled slow-changing fields on first visit / when derived, so a
+    // day the user only glances at still exports right.
     const autoPatch: Partial<IccpDaily> = {
       area, seaChest, cu1: rec.cu1, al1: rec.al1, cu2: rec.cu2, al2: rec.al2,
       ...(draft != null ? { draft } : {}),
@@ -89,38 +115,60 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
       numInput({
         value: (rec[key] as number) ?? null,
         placeholder: prev?.[key] != null ? String(prev[key]) : "",
-        onInput: debounce((v) => save({ [key]: v }), 300),
+        onInput: debounce(async (v) => { await save({ [key]: v }); await refreshRing(true); }, 300),
       });
 
-    // Segmented control — big tappable choices instead of a tiny dropdown.
-    const segment = (opts: string[], current: string, onPick: (v: string) => void) =>
-      h("div", { class: "seg big" },
-        ...opts.map((o) => h("button", { type: "button", class: o === current ? "active" : "",
-          onClick: () => { if (o !== current) onPick(o); } }, o)));
+    const areaSeg = segmented({ options: AREAS, value: area, big: true,
+      onPick: async (v) => { await save({ area: v }); await loadDay(); } });
+    // Changing the sea chest re-derives the MGPS readings from the map for the new
+    // chest (explicit values, so carry-forward doesn't keep the old set).
+    const chestSeg = segmented({ options: SEA_CHESTS, value: seaChest, big: true,
+      onPick: async (v) => { await save({ seaChest: v, ...(MGPS[v] ?? MGPS.S) }); await loadDay(); } });
 
-    const areaSeg = segment(AREAS, area, async (v) => { await save({ area: v }); await loadDay(); });
-    // Changing the sea chest re-derives the MGPS readings, so clear the old
-    // auto-filled cu/al before reloading (loadDay only fills when unset).
-    const chestSeg = segment(SEA_CHESTS, seaChest, async (v) => {
-      await save({ seaChest: v, cu1: undefined, al1: undefined, cu2: undefined, al2: undefined });
-      await loadDay();
-    });
-
-    // Read-only tile showing an auto-derived value (MGPS + locked shaft).
+    // Read-only value tile (view mode) / editable input (long-press edit mode).
     const tile = (lab: string, val: number | null, unit?: string) =>
       h("div", { class: "tile" },
         h("div", { class: "tval" }, val == null ? "—" : String(val), unit ? h("span", { class: "tunit" }, unit) : null),
         h("div", { class: "tlab" }, lab));
+
+    const MGPS_CELLS: [keyof IccpDaily, string][] = [["cu1", "CU 1"], ["al1", "AL 1"], ["cu2", "CU 2"], ["al2", "AL 2"]];
+    const mgpsGrid = h("div", { class: "tilegrid" });
+    const editNote = h("div", { class: "editnote" }, "");
+
+    function renderMgps() {
+      mgpsGrid.className = `tilegrid ${editingMgps ? "editing" : ""}`;
+      if (editingMgps) {
+        mgpsGrid.replaceChildren(
+          ...MGPS_CELLS.map(([key, lab]) =>
+            h("div", { class: "tile" },
+              numInput({ value: (rec[key] as number) ?? null,
+                onInput: debounce((v) => { (rec as any)[key] = v; save({ [key]: v }); }, 300) }),
+              h("div", { class: "tlab" }, lab)))
+        );
+        editNote.textContent = "Editing — new values carry forward as your daily default.";
+      } else {
+        mgpsGrid.replaceChildren(...MGPS_CELLS.map(([key, lab]) => tile(lab, (rec[key] as number) ?? null)));
+        editNote.textContent = "";
+      }
+    }
+    renderMgps();
+    // Long-press the readings to edit them; help chip explains it.
+    longPress(mgpsGrid, () => { if (!editingMgps) { editingMgps = true; renderMgps(); toast("Editing MGPS readings", 1400); } });
+
+    const editToggle = h("button", { class: "helptip", type: "button", style: { width: "auto", padding: "0 8px", borderRadius: "999px" },
+      onClick: () => { editingMgps = !editingMgps; renderMgps(); } }, "edit");
 
     // ---- Section 1: prefilled / auto values (verify at a glance) ----
     const prefilled = h("div", { class: "card group" },
       h("div", { class: "group-hdr" }, h("span", {}, "Auto-filled"), h("span", { class: "group-note" }, "carried forward · tap to change")),
       field("Area of operation", areaSeg),
       field("Sea chest in use", chestSeg),
-      h("div", { class: "tlabhdr" }, "Anti-fouling MGPS (Amp)"),
-      h("div", { class: "tilegrid" },
-        tile("CU 1", rec.cu1 ?? null), tile("AL 1", rec.al1 ?? null),
-        tile("CU 2", rec.cu2 ?? null), tile("AL 2", rec.al2 ?? null)),
+      h("div", { class: "tlabrow" },
+        h("div", { class: "tlabhdr" }, "Anti-fouling MGPS (Amp)"),
+        helpTip("These readings are set by the sea chest and carry forward. Long-press them (or tap ‘edit’) to change — your new values become the daily default."),
+        editToggle),
+      mgpsGrid,
+      editNote,
       stationary
         ? h("div", {},
             h("div", { class: "tlabhdr" }, "Shaft Earthing"),
@@ -148,6 +196,7 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
     );
 
     form.append(prefilled, readings);
+    await refreshRing(false);
   }
 
   async function save(patch: Partial<IccpDaily>, silent = false) {
@@ -169,7 +218,7 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
     screen(
       toolbar(
         monthPicker(curYm, (v) => { curYm = v; rebuildDays(); loadDay(); }, today.getFullYear()),
-        h("span", { class: "progress" }, "Day")
+        ringWrap
       ),
       daySelect,
       h("div", { style: { height: "12px" } }),
@@ -184,9 +233,11 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
 async function openMonthly(curYm: string) {
   const mount = document.getElementById("view")!;
   mount.replaceChildren();
+  const { year, month } = ymParts(curYm);
+  const weeks = Math.max(1, saturdaysInMonth(year, month).length);
   const rec = (await db.iccpMonthly.get(curYm)) ?? { ym: curYm };
   const obs = rec.obs ?? {};
-  const slip = rec.slipring ?? [null, null, null, null, null];
+  const slip = rec.slipring ?? [];
 
   const OBS_ROWS: [string, string][] = [
     ["foulingStrainer", "Fouling in Strainer"],
@@ -198,6 +249,17 @@ async function openMonthly(curYm: string) {
   ];
   const LEVELS = ["Nil", "Light", "Medium", "Heavy"];
 
+  const ringWrap = h("div", {});
+  let lastComplete = false;
+  async function refreshRing(fire: boolean) {
+    const o = (await db.iccpMonthly.get(curYm))?.obs ?? {};
+    const done = OBS_ROWS.filter(([k]) => o[k]).length;
+    ringWrap.replaceChildren(progressRing(done, OBS_ROWS.length, "left"));
+    const complete = done >= OBS_ROWS.length;
+    if (fire && complete && !lastComplete) achievement("Monthly footer complete!", "ICCP observations recorded");
+    lastComplete = complete;
+  }
+
   async function save(patch: any) {
     const cur = (await db.iccpMonthly.get(curYm)) ?? { ym: curYm };
     await db.iccpMonthly.put({ ...cur, ...patch, ym: curYm });
@@ -207,18 +269,23 @@ async function openMonthly(curYm: string) {
     const sel = h("select", { onChange: async (e: Event) => {
       const o = { ...(await db.iccpMonthly.get(curYm))?.obs, [key]: (e.target as HTMLSelectElement).value || null };
       await save({ obs: o });
+      await refreshRing(true);
     } },
       h("option", { value: "", selected: !obs[key] }, "—"),
       ...LEVELS.map((l) => h("option", { value: l, selected: obs[key] === l }, l)));
     return h("label", { class: "field" }, h("span", { class: "lab" }, label), sel);
   });
 
-  const slipEls = slip.map((v: number | null, i: number) =>
+  // One slipring week per Saturday in the month; blank weeks fall back to a
+  // stable 15–20 mV prefill (shown as placeholder, used on export).
+  const slipEls = Array.from({ length: weeks }, (_, i) =>
     h("label", { class: "field" }, h("span", { class: "lab" }, `Slipring week ${i + 1} (mV)`),
-      numInput({ value: v, onInput: debounce(async (nv) => {
-        const cur = (await db.iccpMonthly.get(curYm))?.slipring ?? [null, null, null, null, null];
-        cur[i] = nv; await save({ slipring: cur });
-      }, 350) })));
+      numInput({ value: slip[i] ?? null, placeholder: String(slipringDefault(curYm, i)),
+        onInput: debounce(async (nv) => {
+          const cur = (await db.iccpMonthly.get(curYm))?.slipring ?? [];
+          while (cur.length < weeks) cur.push(null);
+          cur[i] = nv; await save({ slipring: cur });
+        }, 350) })));
 
   const strainerInp = h("input", { value: rec.strainerNote ?? "", placeholder: "Strainer inspected LOW: … HIGH: …",
     onInput: debounce((e: Event) => save({ strainerNote: (e.target as HTMLInputElement).value }), 400) });
@@ -228,12 +295,15 @@ async function openMonthly(curYm: string) {
   mount.append(
     topbar("ICCP Monthly Footer", curYm, "/rec/iccp"),
     screen(
+      toolbar(h("span", { class: "progress" }, "Observations"), ringWrap),
       h("h2", { style: { marginLeft: 0 } }, "Observations"),
       ...obsEls,
       h("label", { class: "field" }, h("span", { class: "lab" }, "Strainer inspection note"), strainerInp),
       h("h2", { style: { marginLeft: 0 } }, "Slipring checks"),
+      h("p", { class: "hint", style: { marginTop: "-4px" } }, `${weeks} week${weeks > 1 ? "s" : ""} this month. Blank weeks use a 15–20 mV default.`),
       ...slipEls,
       h("label", { class: "field" }, h("span", { class: "lab" }, "Remark"), remarkInp)
     )
   );
+  await refreshRing(false);
 }

@@ -1,11 +1,11 @@
 import { h, topbar, screen, navigate } from "../ui";
 import { db } from "../db";
-import { isSaturday, isoDate, ym, monthLabel, saturdaysInMonth, ymParts } from "../util";
-import { RECORDS } from "../records";
+import { isSaturday, isoDate, ym, monthLabel, saturdaysInMonth, ymParts, parseIso, MONTHS_SHORT } from "../util";
 import {
-  iccpStatus, batteryStatus, fireStatus, motorTempStatus,
-  vibrationStatus, busbarStatus, freonStatus, cmStatus, type RecStatus,
+  motorTempStatus, vibrationStatus, busbarStatus, freonStatus, cmStatus, type RecStatus,
 } from "../status";
+
+type Mode = "daily" | "sat" | "monthly";
 
 function statusChip(s: RecStatus): HTMLElement {
   const cls = s.state === "done" ? "done" : s.state === "partial" ? "due" : "pending";
@@ -32,90 +32,158 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
   const todayIso = isoDate(today);
   const curYm = ym(today);
   const sat = isSaturday(today);
+  const primary: Mode = sat ? "sat" : "daily";
+  let active: Mode = primary;
 
-  const nodes: Node[] = [];
-
-  // ----- Daily section -----
-  nodes.push(h("h2", {}, "Daily"));
+  // ---- gather quick status for the tile badges ----
   const iccpToday = await db.iccpDaily.get(todayIso);
-  const iccpDone = iccpToday && (iccpToday.amp != null || iccpToday.area);
-  nodes.push(
-    cardLink(
-      "🌊",
-      "ICCP / MGPS Reading",
-      todayIso + (iccpDone ? " · entered" : " · tap to enter today"),
-      "/rec/iccp",
-      iccpDone ? h("span", { class: "chip done" }, "✓") : h("span", { class: "chip due" }, "Due")
-    )
-  );
+  const iccpDone = !!(iccpToday && (iccpToday.amp != null || iccpToday.area));
 
-  // ----- Weekly (Saturday) section -----
-  if (sat) {
-    nodes.push(h("h2", {}, "This Saturday"));
-    const batToday = await db.battery.where("date").equals(todayIso).count();
-    nodes.push(
-      cardLink(
-        "🔋",
-        "Battery Log",
-        batToday > 0 ? `${batToday}/5 banks entered` : "Weekly battery test — tap to record",
-        "/rec/battery",
-        batToday >= 5 ? h("span", { class: "chip done" }, "✓") : h("span", { class: "chip due" }, "Due")
-      )
-    );
-    const fireToday = await db.fireTest.where("testedDate").equals(todayIso).count();
-    nodes.push(
-      cardLink(
-        "🚨",
-        "Fire Detector Test",
-        fireToday > 0 ? `${fireToday} detectors tested today` : "Weekly detector test — tap to record",
-        "/rec/fire",
-        fireToday > 0 ? h("span", { class: "chip done" }, `${fireToday}`) : h("span", { class: "chip due" }, "Due")
-      )
-    );
-  } else {
-    // Show upcoming Saturday hint + any missed Saturdays this month
-    const { year, month } = ymParts(curYm);
-    const sats = saturdaysInMonth(year, month).filter((s) => s <= todayIso);
-    const battDates = new Set((await db.battery.toArray()).map((e) => e.date));
-    const missed = sats.filter((s) => !battDates.has(s));
-    if (missed.length) {
-      nodes.push(h("h2", {}, "Missed Saturdays"));
-      nodes.push(
-        cardLink("🔋", "Battery Log pending", `${missed.length} Saturday(s) not recorded`, "/rec/battery",
-          h("span", { class: "chip bad" }, `${missed.length}`))
-      );
-    }
-  }
+  const { year, month } = ymParts(curYm);
+  const sats = saturdaysInMonth(year, month);
+  const battDates = new Set((await db.battery.toArray()).map((e) => e.date));
+  const pastSats = sats.filter((s) => s <= todayIso);
+  const missed = pastSats.filter((s) => !battDates.has(s));
+  const nextSat = sats.find((s) => s > todayIso);
+  const batTodayCount = sat ? await db.battery.where("date").equals(todayIso).count() : 0;
+  const fireTodayCount = sat ? await db.fireTest.where("testedDate").equals(todayIso).count() : 0;
 
-  // ----- Monthly section -----
-  nodes.push(h("h2", {}, `Monthly · ${monthLabel(curYm)}`));
-  const monthly: [string, string, string, () => Promise<RecStatus>][] = [
+  const monthlyDefs: [string, string, string, () => Promise<RecStatus>][] = [
     ["🌡️", "Motor Temp", "/rec/motortemp", () => motorTempStatus(curYm)],
     ["📳", "Motor Vibration", "/rec/vibration", () => vibrationStatus(curYm)],
     ["⚡", "Busbar Temp", "/rec/busbar", () => busbarStatus(curYm)],
     ["❄️", "Freon Consumption", "/rec/freon", () => freonStatus(curYm)],
     ["📊", "Condition Monitoring", "/rec/conditionmon", () => cmStatus(curYm)],
   ];
-  for (const [ic, title, route, fn] of monthly) {
-    const s = await fn();
-    nodes.push(cardLink(ic, title, s.label, route, statusChip(s)));
+  const monthlyStatuses = await Promise.all(monthlyDefs.map((d) => d[3]()));
+  const monthlyDone = monthlyStatuses.filter((s) => s.state === "done").length;
+
+  // ---- tile descriptors ----
+  const badge = (cls: string, txt: string) => h("span", { class: `chip ${cls}` }, txt);
+  function tileInfo(mode: Mode): { ic: string; title: string; sub: string; badge: HTMLElement } {
+    if (mode === "daily")
+      return {
+        ic: "📋", title: "Daily",
+        sub: iccpDone ? "ICCP · entered today" : "ICCP reading due",
+        badge: iccpDone ? badge("done", "✓") : badge("due", "Due"),
+      };
+    if (mode === "sat") {
+      if (sat) {
+        const done = batTodayCount >= 5 && fireTodayCount > 0;
+        return { ic: "🛟", title: "Saturday", sub: "Safety routine · today",
+          badge: done ? badge("done", "✓") : badge("due", "Due") };
+      }
+      if (missed.length)
+        return { ic: "🛟", title: "Saturday", sub: `${missed.length} missed this month`,
+          badge: badge("bad", String(missed.length)) };
+      return { ic: "🛟", title: "Saturday",
+        sub: nextSat ? `Next: ${dayLabel(nextSat)}` : "All Saturdays done",
+        badge: badge("done", "✓") };
+    }
+    return {
+      ic: "📅", title: "Monthly", sub: `${MONTHS_SHORT[month - 1]} · ${monthlyDone}/5 files done`,
+      badge: monthlyDone >= 5 ? badge("done", "✓") : badge("due", `${5 - monthlyDone}`),
+    };
   }
 
-  // ----- Export shortcut -----
-  nodes.push(h("div", { class: "divider" }));
-  nodes.push(
-    h("div", { class: "card tap", onClick: () => navigate("/export"), style: { background: "var(--accent-d)", borderColor: "var(--accent)" } },
-      h("div", { class: "card-row" },
-        h("div", { class: "icon" }, "⬇️"),
-        h("div", { class: "body" }, h("div", { class: "title" }, "Export Month End"),
-          h("div", { class: "desc" }, "Download all Excel files for the month")),
-        h("div", { class: "chev" }, "›")))
+  const tiles: Partial<Record<Mode, HTMLElement>> = {};
+  function buildTile(mode: Mode, hero: boolean): HTMLElement {
+    const info = tileInfo(mode);
+    const isSafety = mode === "sat";
+    const el = h(
+      "button",
+      {
+        class: `modetile ${hero ? "hero" : ""} ${isSafety ? "safety" : ""} ${mode === active ? "active" : ""}`,
+        onClick: () => setMode(mode),
+      },
+      h("span", { class: "mt-ic" }, info.ic),
+      h("div", { class: "mt-body" }, h("div", { class: "mt-title" }, info.title), h("div", { class: "mt-sub" }, info.sub)),
+      h("span", { class: "mt-badge" }, info.badge)
+    );
+    tiles[mode] = el;
+    return el;
+  }
+
+  // hero = the day's primary mode; the other two sit in the row below.
+  const order: Mode[] = ["daily", "sat", "monthly"];
+  const secondary = order.filter((m) => m !== primary);
+  const modebar = h(
+    "div",
+    { class: "modebar" },
+    buildTile(primary, true),
+    h("div", { class: "mode-row" }, ...secondary.map((m) => buildTile(m, false)))
   );
+
+  const listEl = h("div", {});
+
+  function setMode(mode: Mode) {
+    if (mode === active) return;
+    active = mode;
+    for (const m of order) tiles[m]?.classList.toggle("active", m === active);
+    renderList();
+  }
+
+  function renderList() {
+    listEl.replaceChildren();
+    if (active === "daily") {
+      listEl.append(
+        cardLink("🌊", "ICCP / MGPS Reading",
+          todayIso + (iccpDone ? " · entered" : " · tap to enter today"), "/rec/iccp",
+          iccpDone ? h("span", { class: "chip done" }, "✓") : h("span", { class: "chip due" }, "Due"))
+      );
+    } else if (active === "sat") {
+      if (sat) {
+        listEl.append(
+          cardLink("🔋", "Battery Log",
+            batTodayCount > 0 ? `${batTodayCount}/5 banks entered` : "Weekly battery test — tap to record", "/rec/battery",
+            batTodayCount >= 5 ? h("span", { class: "chip done" }, "✓") : h("span", { class: "chip due" }, "Due")),
+          cardLink("🚨", "Fire Detector Test",
+            fireTodayCount > 0 ? `${fireTodayCount} detectors tested today` : "Weekly detector test — tap to record", "/rec/fire",
+            fireTodayCount > 0 ? h("span", { class: "chip done" }, `${fireTodayCount}`) : h("span", { class: "chip due" }, "Due"))
+        );
+      } else {
+        if (missed.length) {
+          listEl.append(
+            cardLink("🔋", "Battery Log pending", `${missed.length} Saturday(s) not recorded`, "/rec/battery",
+              h("span", { class: "chip bad" }, `${missed.length}`))
+          );
+        }
+        listEl.append(
+          h("div", { class: "card" },
+            h("p", { class: "hint", style: { margin: 0 } },
+              nextSat ? `Next Saturday routine: ${dayLabel(nextSat)}. Battery + fire-detector tests.`
+                      : "No more Saturdays this month."))
+        );
+        listEl.append(cardLink("🔋", "Battery Log", "Open weekly battery record", "/rec/battery"));
+        listEl.append(cardLink("🚨", "Fire Detector Test", "Open quarterly detector record", "/rec/fire"));
+      }
+    } else {
+      monthlyDefs.forEach(([ic, title, route], i) => {
+        listEl.append(cardLink(ic, title, monthlyStatuses[i].label, route, statusChip(monthlyStatuses[i])));
+      });
+      listEl.append(h("div", { class: "divider" }));
+      listEl.append(
+        h("div", { class: "card tap", onClick: () => navigate("/export"),
+          style: { background: "var(--accent-d)", borderColor: "var(--accent)" } },
+          h("div", { class: "card-row" },
+            h("div", { class: "icon" }, "⬇️"),
+            h("div", { class: "body" }, h("div", { class: "title" }, "Export Month End"),
+              h("div", { class: "desc" }, "Download all Excel files for the month")),
+            h("div", { class: "chev" }, "›")))
+      );
+    }
+  }
 
   mount.append(
     topbar("Month End", `${await vesselName()} · ${todayIso}${sat ? " · SATURDAY" : ""}`),
-    screen(...nodes)
+    screen(modebar, h("div", { style: { height: "6px" } }), listEl)
   );
+  renderList();
+}
+
+function dayLabel(iso: string): string {
+  const d = parseIso(iso);
+  return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`;
 }
 
 async function vesselName(): Promise<string> {

@@ -4,6 +4,7 @@ import { masters } from "../seed";
 import { recById } from "../records";
 import {
   MONTHS_FULL, ymParts, excelSerial, parseIso, quarterWindow, ddmmyyyy,
+  saturdaysInMonth, slipringDefault,
 } from "../util";
 import {
   busbarMonthCol, freonMonthCol, motorTempMonthCol, vibrationVelCol, vibrationAccCol,
@@ -264,8 +265,15 @@ export async function genIccp(ymStr: string): Promise<ExportResult> {
       if (lvl && levelCol[lvl]) setVal(ws, row, levelCol[lvl], "*");
     }
     if (mon.strainerNote) setVal(ws, 45, 7, mon.strainerNote);
-    (mon.slipring ?? []).forEach((v, i) => setVal(ws, 46 + i, 26, v ?? null));
     if (mon.remark) setVal(ws, 55, 1, mon.remark);
+  }
+  // Slipring weeks (template rows 46–50): stored value first, else a stable
+  // 15–20 mV default for weeks that actually occur this month, else blank.
+  const weeks = saturdaysInMonth(year, month).length;
+  const slip = mon?.slipring ?? [];
+  for (let i = 0; i < 5; i++) {
+    const v = slip[i] ?? (i < weeks ? slipringDefault(ymStr, i) : null);
+    setVal(ws, 46 + i, 26, v);
   }
   return { filename: fileName("iccp", ymStr), blob: await toBlob(wb) };
 }

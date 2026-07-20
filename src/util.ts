@@ -88,6 +88,26 @@ export function quarterWindow(ymStr: string): { label: string; startYm: string; 
   };
 }
 
+/** Number of weeks (Saturdays) in a month — drives the slipring week count. */
+export function weeksInMonth(year: number, month: number): number {
+  return saturdaysInMonth(year, month).length;
+}
+
+/**
+ * Deterministic prefill for a slipring week reading (15–20 mV). Stable for a
+ * given month+week so the on-screen placeholder and the exported value agree
+ * without persisting anything. Used when the user leaves a week blank.
+ */
+export function slipringDefault(ymStr: string, weekIndex: number): number {
+  let hsh = 2166136261;
+  const s = `${ymStr}#${weekIndex}`;
+  for (let k = 0; k < s.length; k++) {
+    hsh ^= s.charCodeAt(k);
+    hsh = Math.imul(hsh, 16777619);
+  }
+  return 15 + (Math.abs(hsh) % 6); // 15..20 inclusive
+}
+
 export function debounce<T extends (...a: any[]) => void>(fn: T, ms = 300): T {
   let t: any;
   return ((...args: any[]) => {
