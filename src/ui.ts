@@ -86,11 +86,31 @@ async function renderRoute() {
 }
 
 function updateNav(path: string) {
+  let activeBtn: HTMLElement | null = null;
   document.querySelectorAll<HTMLElement>(".bottomnav button").forEach((b) => {
     const target = b.dataset.route!;
     const active = target === "/" ? path === "/" : path.startsWith(target);
     b.classList.toggle("active", active);
+    if (active) activeBtn = b;
   });
+  moveNavPill(activeBtn);
+}
+
+// Slide the highlight pill under the active dock item.
+function moveNavPill(btn: HTMLElement | null) {
+  const pill = document.querySelector<HTMLElement>(".nav-pill");
+  const dock = document.querySelector<HTMLElement>(".dock");
+  if (!pill || !dock) return;
+  if (!btn) { pill.style.opacity = "0"; return; }
+  const place = () => {
+    pill.style.opacity = "1";
+    pill.style.width = `${btn.offsetWidth}px`;
+    pill.style.height = `${btn.offsetHeight}px`;
+    pill.style.transform = `translateX(${btn.offsetLeft}px)`;
+  };
+  // Wait a frame if layout isn't measured yet (first paint).
+  if (btn.offsetWidth) place();
+  else requestAnimationFrame(place);
 }
 
 // ---- theme (light / dark) ----
@@ -148,12 +168,15 @@ export function numInput(opts: {
   onInput: (v: number | null) => void;
   step?: string;
   decimal?: boolean;
+  readonly?: boolean;
 }): HTMLInputElement {
   const inp = h("input", {
     type: "text",
     inputmode: opts.decimal === false ? "numeric" : "decimal",
     value: opts.value ?? "",
     placeholder: opts.placeholder ?? "",
+    readonly: opts.readonly || undefined,
+    class: opts.readonly ? "locked" : undefined,
     onInput: (e: Event) => {
       const raw = (e.target as HTMLInputElement).value.trim();
       if (raw === "") return opts.onInput(null);

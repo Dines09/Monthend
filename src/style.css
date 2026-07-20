@@ -14,8 +14,11 @@
   --nav-bg: #0c2536;
   --btn-fg: #062031;
   --input-ph: #5f8299;
-  --nav-h: 62px;
+  --nav-h: 84px;
   --top-h: 54px;
+  --dock-bg: rgba(18, 44, 64, .82);
+  --dock-line: rgba(56, 182, 255, .18);
+  --dock-pill: rgba(56, 182, 255, .16);
 }
 
 :root[data-theme="light"] {
@@ -34,6 +37,9 @@
   --nav-bg: #ffffff;
   --btn-fg: #ffffff;
   --input-ph: #9fb3c1;
+  --dock-bg: rgba(255, 255, 255, .82);
+  --dock-line: rgba(15, 123, 196, .2);
+  --dock-pill: rgba(15, 123, 196, .14);
 }
 
 html { transition: background .2s; }
@@ -104,20 +110,48 @@ body {
 .chip.pending { background: rgba(147,179,199,.14); color: var(--muted); }
 .chip.bad { background: rgba(240,85,106,.16); color: var(--bad); }
 
-/* ---- bottom nav ---- */
+/* ---- floating dock nav (macOS-style) ---- */
 .bottomnav {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
-  height: calc(var(--nav-h) + env(safe-area-inset-bottom));
-  padding-bottom: env(safe-area-inset-bottom);
-  display: flex; background: var(--nav-bg); border-top: 1px solid var(--line);
+  position: fixed; left: 0; right: 0; z-index: 30;
+  bottom: calc(env(safe-area-inset-bottom) + 12px);
+  display: flex; justify-content: center;
+  pointer-events: none; /* only the dock catches taps */
+}
+.dock {
+  position: relative;
+  pointer-events: auto;
+  display: flex; gap: 2px;
+  padding: 7px 8px;
+  border-radius: 22px;
+  background: var(--dock-bg);
+  border: 1px solid var(--dock-line);
+  box-shadow: 0 10px 30px rgba(0,0,0,.38), 0 2px 6px rgba(0,0,0,.25);
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  backdrop-filter: blur(16px) saturate(1.4);
+  max-width: calc(100vw - 24px);
+}
+/* sliding highlight pill behind the active item */
+.dock .nav-pill {
+  position: absolute; left: 8px; top: 7px;
+  border-radius: 16px; background: var(--dock-pill);
+  opacity: 0; z-index: 0;
+  transition: transform .32s cubic-bezier(.22,.9,.3,1), width .32s cubic-bezier(.22,.9,.3,1), opacity .2s;
 }
 .bottomnav button {
-  flex: 1; background: none; border: none; color: var(--muted);
+  position: relative; z-index: 1;
+  min-width: 62px; background: none; border: none; color: var(--muted);
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
-  font-size: 11px; font-weight: 600; padding: 6px 0;
+  font-size: 11px; font-weight: 600; padding: 8px 4px 7px;
+  border-radius: 16px;
+  transition: color .2s, transform .12s;
 }
-.bottomnav button .ic { font-size: 22px; }
+.bottomnav button:active { transform: scale(.9); }
+.bottomnav button .ic { font-size: 22px; line-height: 1; }
 .bottomnav button.active { color: var(--accent); }
+
+input.locked, textarea.locked {
+  opacity: .75; color: var(--muted); cursor: not-allowed;
+}
 
 /* ---- forms ---- */
 label.field { display: block; margin-bottom: 14px; }

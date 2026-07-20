@@ -20,13 +20,20 @@ const app = document.getElementById("app")!;
 function bottomNav(): HTMLElement {
   const item = (r: string, ic: string, label: string) =>
     h("button", { "data-route": r, onClick: () => navigate(r) }, h("span", { class: "ic" }, ic), label);
+  // Sliding highlight pill that moves under the active item (macOS-dock feel).
+  const pill = h("div", { class: "nav-pill" });
   return h(
     "div",
     { class: "bottomnav" },
-    item("/", "📋", "Today"),
-    item("/records", "🗂️", "Records"),
-    item("/export", "⬇️", "Export"),
-    item("/settings", "⚙️", "Settings")
+    h(
+      "div",
+      { class: "dock" },
+      pill,
+      item("/", "📋", "Today"),
+      item("/records", "🗂️", "Records"),
+      item("/export", "⬇️", "Export"),
+      item("/settings", "⚙️", "Settings")
+    )
   );
 }
 

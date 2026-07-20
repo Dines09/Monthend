@@ -4,6 +4,19 @@ import { isoDate, defaultReportYm, ymParts, debounce, parseIso } from "../util";
 import { monthPicker, toolbar } from "./parts";
 
 const AREAS = ["Sea", "Port", "Anchor"];
+const SEA_CHESTS = ["P", "S", "P/S"];
+
+// Anti-fouling MGPS readings depend on which sea chest is in use.
+// P: Cu1 leads; S: readings swap between the two cells.
+const MGPS: Record<string, { cu1: number; al1: number; cu2: number; al2: number }> = {
+  P: { cu1: 1.2, al1: 1.4, cu2: 0.2, al2: 0.4 },
+  S: { cu1: 0.2, al1: 0.4, cu2: 1.2, al2: 1.4 },
+};
+// P/S in use -> keep the P (leading) set; no swap.
+MGPS["P/S"] = MGPS.P;
+
+// Ship is stationary at Port/Anchor -> shaft is not turning -> shaft potential is 0.
+const STATIONARY = new Set(["Port", "Anchor"]);
 
 export async function renderIccp(_p: Record<string, string>, mount: HTMLElement) {
   const today = new Date();
@@ -28,22 +41,70 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
   }
 
   async function loadDay() {
-    const rec = (await db.iccpDaily.get(selDate)) ?? { date: selDate };
+    const saved = await db.iccpDaily.get(selDate);
     const prevDate = isoDate(new Date(parseIso(selDate).getTime() - 86400000));
     const prev = await db.iccpDaily.get(prevDate);
+
+    // Effective values shown to the user: saved value first, else carried
+    // forward from the previous day, else a sensible default. These "guessed"
+    // slow-changing fields are persisted so exports have them without the user
+    // re-entering anything each day.
+    const area = saved?.area ?? prev?.area ?? "Sea";
+    const seaChest = saved?.seaChest ?? prev?.seaChest ?? "S";
+    const draft = saved?.draft ?? prev?.draft ?? null;
+    const stationary = STATIONARY.has(area);
+    const mgps = MGPS[seaChest] ?? MGPS.S;
+
+    const rec: IccpDaily = {
+      date: selDate,
+      area,
+      seaChest,
+      draft: draft ?? undefined,
+      cu1: saved?.cu1 ?? mgps.cu1,
+      al1: saved?.al1 ?? mgps.al1,
+      cu2: saved?.cu2 ?? mgps.cu2,
+      al2: saved?.al2 ?? mgps.al2,
+      shaftMv: stationary ? 0 : saved?.shaftMv,
+      seaTemp: saved?.seaTemp,
+      amp: saved?.amp,
+      volt: saved?.volt,
+      cell1: saved?.cell1,
+      cell2: saved?.cell2,
+    };
+
+    // Persist the auto-filled slow-changing fields on first visit / when they
+    // were just derived (so a day the user only glances at still exports right).
+    const autoPatch: Partial<IccpDaily> = {
+      area, seaChest, cu1: rec.cu1, al1: rec.al1, cu2: rec.cu2, al2: rec.al2,
+      ...(draft != null ? { draft } : {}),
+      ...(stationary ? { shaftMv: 0 } : {}),
+    };
+    if (needsAutoSave(saved, autoPatch)) await save(autoPatch, true);
+
     form.replaceChildren();
 
     const field = (lab: string, node: Node) => h("label", { class: "field" }, h("span", { class: "lab" }, lab), node);
-    const nf = (key: keyof IccpDaily, ph?: string) =>
-      numInput({ value: (rec[key] as number) ?? null, placeholder: ph ?? (prev?.[key] != null ? String(prev[key]) : ""),
-        onInput: debounce((v) => save({ [key]: v }), 300) });
+    const nf = (key: keyof IccpDaily) =>
+      numInput({
+        value: (rec[key] as number) ?? null,
+        placeholder: prev?.[key] != null ? String(prev[key]) : "",
+        onInput: debounce((v) => save({ [key]: v }), 300),
+      });
 
-    const areaSel = h("select", { onChange: (e: Event) => save({ area: (e.target as HTMLSelectElement).value }) },
-      h("option", { value: "", selected: !rec.area }, "—"),
-      ...AREAS.map((a) => h("option", { value: a, selected: rec.area === a }, a)));
-    const seaChestSel = h("select", { onChange: (e: Event) => save({ seaChest: (e.target as HTMLSelectElement).value }) },
-      h("option", { value: "", selected: !rec.seaChest }, "—"),
-      ...["P", "S", "P/S"].map((a) => h("option", { value: a, selected: rec.seaChest === a }, a)));
+    const areaSel = h("select", { onChange: async (e: Event) => { await save({ area: (e.target as HTMLSelectElement).value }); await loadDay(); } },
+      ...AREAS.map((a) => h("option", { value: a, selected: area === a }, a)));
+    // Changing the sea chest re-derives the MGPS readings, so clear the old
+    // auto-filled cu/al before reloading (loadDay only fills when unset).
+    const seaChestSel = h("select", { onChange: async (e: Event) => {
+      const v = (e.target as HTMLSelectElement).value;
+      await save({ seaChest: v, cu1: undefined, al1: undefined, cu2: undefined, al2: undefined });
+      await loadDay();
+    } },
+      ...SEA_CHESTS.map((a) => h("option", { value: a, selected: seaChest === a }, a)));
+
+    const shaftField = stationary
+      ? field("Shaft potential (mV)", numInput({ value: 0, readonly: true, onInput: () => {} }))
+      : field("Shaft potential (mV)", nf("shaftMv"));
 
     form.append(
       h("div", { class: "grid2" },
@@ -65,14 +126,20 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
       h("div", { class: "grid2" },
         field("CU2", nf("cu2")), field("AL2", nf("al2"))),
       h("h2", { style: { marginLeft: 0 } }, "Shaft Earthing"),
-      field("Shaft potential (mV)", nf("shaftMv"))
+      shaftField
     );
   }
 
-  async function save(patch: Partial<IccpDaily>) {
+  async function save(patch: Partial<IccpDaily>, silent = false) {
     const cur = (await db.iccpDaily.get(selDate)) ?? { date: selDate };
     await db.iccpDaily.put({ ...cur, ...patch, date: selDate });
-    toast("Saved", 900);
+    if (!silent) toast("Saved", 900);
+  }
+
+  // True if any key in the auto-fill patch differs from what's already stored.
+  function needsAutoSave(saved: IccpDaily | undefined, patch: Partial<IccpDaily>): boolean {
+    if (!saved) return true;
+    return Object.entries(patch).some(([k, v]) => (saved as any)[k] !== v);
   }
 
   daySelect.addEventListener("change", () => { selDate = daySelect.value; loadDay(); });
