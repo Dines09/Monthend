@@ -10,6 +10,14 @@ import {
   cmTempCol, cmVibVelCol, cmVibAccCol, ICCP_COLS, BATTERY_WEEK_COLS, BATTERY_BANKS, colLetter,
 } from "./columns";
 
+// Write a live Excel SUM formula (with the JS-computed value as cached result so
+// it shows correctly even before Excel recalculates).
+function setSumFormula(ws: ExcelJS.Worksheet, row: number, col: number, cellRows: number[], result: number | null) {
+  const L = colLetter(col);
+  const parts = cellRows.map((r) => `${L}${r}`).join(",");
+  ws.getCell(row, col).value = { formula: `SUM(${parts})`, result: result ?? 0 } as any;
+}
+
 const TEMPLATE_BASE = import.meta.env.BASE_URL + "templates/";
 
 async function loadTemplate(name: string): Promise<ExcelJS.Workbook> {
@@ -292,13 +300,24 @@ export async function genBattery(ymStr: string): Promise<ExportResult> {
       if (!satDate) continue;
       const entry = entries.find((e) => e.date === satDate && e.bankId === bank.id);
       if (!entry) continue;
+      let voltSum = 0;
+      const filledRows: number[] = [];
       entry.readings.forEach((rd, i) => {
         const r = bank.cellRows[i];
         if (r == null) return;
         setVal(ws, r, auxCol, rd.aux ?? null);
         setVal(ws, r, voltCol, rd.volt ?? null);
+        if (typeof rd.volt === "number") { voltSum += rd.volt; filledRows.push(r); }
       });
-      setVal(ws, bank.totalRow, voltCol, entry.total ?? null);
+      // Write a LIVE SUM formula (like the original workbook) over this bank's
+      // cell rows in this week's volt column. Cached result = entered total if
+      // present, else the computed sum, so it displays before recalculation.
+      if (filledRows.length) {
+        const cached = entry.total ?? voltSum;
+        setSumFormula(ws, bank.totalRow, voltCol, bank.cellRows, cached);
+      } else {
+        setVal(ws, bank.totalRow, voltCol, entry.total ?? null);
+      }
       setVal(ws, bank.remarkRow, auxCol, entry.remark ?? null);
     }
   }

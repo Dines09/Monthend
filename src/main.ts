@@ -1,5 +1,5 @@
 import "./style.css";
-import { h, initRouter, route, navigate } from "./ui";
+import { h, initRouter, route, navigate, initTheme } from "./ui";
 import { ensureSeeded } from "./seed";
 import { renderToday } from "./screens/today";
 import { renderRecords } from "./screens/records";
@@ -46,6 +46,7 @@ route("/rec/conditionmon", renderConditionMon);
 route("/rec/overhaul", renderOverhaul);
 
 async function boot() {
+  initTheme();
   app.append(
     h(
       "div",

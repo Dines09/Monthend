@@ -93,12 +93,47 @@ function updateNav(path: string) {
   });
 }
 
+// ---- theme (light / dark) ----
+const THEME_KEY = "monthend-theme";
+export type Theme = "dark" | "light";
+
+export function getTheme(): Theme {
+  return (localStorage.getItem(THEME_KEY) as Theme) || "dark";
+}
+
+export function applyTheme(t: Theme) {
+  document.documentElement.setAttribute("data-theme", t);
+  localStorage.setItem(THEME_KEY, t);
+  const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+  if (meta) meta.content = t === "light" ? "#0f5c8a" : "#0f3d5c";
+}
+
+export function initTheme() {
+  applyTheme(getTheme());
+}
+
+export function themeToggle(): HTMLButtonElement {
+  const btn = h("button", {
+    class: "themebtn",
+    title: "Toggle light / dark",
+    "aria-label": "Toggle light or dark mode",
+    onClick: () => {
+      const next: Theme = getTheme() === "dark" ? "light" : "dark";
+      applyTheme(next);
+      btn.textContent = next === "dark" ? "☀️" : "🌙";
+    },
+  });
+  btn.textContent = getTheme() === "dark" ? "☀️" : "🌙";
+  return btn;
+}
+
 export function topbar(title: string, sub?: string, back?: string): HTMLElement {
   return h(
     "div",
     { class: "topbar" },
     back ? h("button", { class: "back", onClick: () => navigate(back) }, "‹") : null,
-    h("h1", {}, title, sub ? h("div", { class: "sub" }, sub) : null)
+    h("h1", {}, title, sub ? h("div", { class: "sub" }, sub) : null),
+    themeToggle()
   );
 }
 
