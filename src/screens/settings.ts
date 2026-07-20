@@ -30,6 +30,14 @@ export async function renderSettings(_p: Record<string, string>, mount: HTMLElem
       h("h2", { style: { marginLeft: 0 } }, "Danger zone"),
       h("button", { class: "btn", style: { background: "var(--bad)", color: "#fff" }, onClick: resetAll }, "Reset app (re-seed from originals)"),
 
+      h("h2", { style: { marginLeft: 0 } }, "About"),
+      h("div", { class: "card" },
+        h("div", { class: "card-row" },
+          h("div", { class: "body" },
+            h("div", { class: "title" }, "App version"),
+            h("div", { class: "desc" }, `Built ${__BUILD_DATE__}`)),
+          h("span", { class: "chip done", style: { fontSize: "14px" } }, `v${__APP_VERSION__}`))),
+
       h("p", { class: "hint", style: { marginTop: "20px", textAlign: "center" } }, "Month End PWA · works offline once installed")
     )
   );

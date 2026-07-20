@@ -1,6 +1,9 @@
 import { defineConfig, type Plugin } from "vite";
-import { readdirSync, writeFileSync, existsSync } from "fs";
+import { readdirSync, writeFileSync, existsSync, readFileSync } from "fs";
 import { resolve } from "path";
+
+const pkg = JSON.parse(readFileSync(resolve(__dirname, "package.json"), "utf-8"));
+const BUILD_DATE = new Date().toISOString().slice(0, 10);
 
 // Generate a service worker that precaches all built assets + templates for offline use.
 function swPlugin(): Plugin {
@@ -50,6 +53,10 @@ self.addEventListener("fetch", (e) => {
 
 export default defineConfig({
   base: "./",
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+    __BUILD_DATE__: JSON.stringify(BUILD_DATE),
+  },
   plugins: [swPlugin()],
   build: {
     target: "es2020",
