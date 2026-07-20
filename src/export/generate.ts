@@ -11,11 +11,14 @@ import {
 } from "./columns";
 
 // Write a live Excel SUM formula (with the JS-computed value as cached result so
-// it shows correctly even before Excel recalculates).
+// it shows correctly even before Excel recalculates). Uses a first:last range
+// (e.g. SUM(C15:C26)) like the original workbooks, not an enumerated cell list.
 function setSumFormula(ws: ExcelJS.Worksheet, row: number, col: number, cellRows: number[], result: number | null) {
   const L = colLetter(col);
-  const parts = cellRows.map((r) => `${L}${r}`).join(",");
-  ws.getCell(row, col).value = { formula: `SUM(${parts})`, result: result ?? 0 } as any;
+  const first = cellRows[0];
+  const last = cellRows[cellRows.length - 1];
+  const ref = first === last ? `${L}${first}` : `${L}${first}:${L}${last}`;
+  ws.getCell(row, col).value = { formula: `SUM(${ref})`, result: result ?? 0 } as any;
 }
 
 const TEMPLATE_BASE = import.meta.env.BASE_URL + "templates/";
