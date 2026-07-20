@@ -1,8 +1,10 @@
-import { h, topbar, screen, numInput, toast } from "../ui";
+import { h, topbar, screen, numInput, toast, segmented } from "../ui";
 import { db, type BatteryEntry } from "../db";
 import { masters } from "../seed";
-import { isoDate, defaultReportYm, saturdaysInMonth, ymParts, debounce } from "../util";
+import { saturdaysInMonth, ymParts, debounce, ddMmmYyyy } from "../util";
 import { monthPicker, toolbar } from "./parts";
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
 export async function renderBattery(_p: Record<string, string>, mount: HTMLElement) {
   const today = new Date();
@@ -10,86 +12,96 @@ export async function renderBattery(_p: Record<string, string>, mount: HTMLEleme
   let selDate = "";
   let bankIdx = 0;
 
-  const dateSelect = h("select", {});
-  const bankSeg = h("div", { class: "seg", style: { flexWrap: "wrap" } });
+  const banks = masters.batteryBanks;
+  const dateSelect = h("select", { class: "dayselect" });
+  const bankSeg = segmented({
+    options: banks.map((b: any) => b.id),
+    labels: banks.map((b: any) => shortBankName(b)),
+    value: banks[bankIdx].id,
+    compact: true,
+    onPick: (v) => { bankIdx = banks.findIndex((b: any) => b.id === v); renderBank(); },
+  });
   const body = h("div", {});
 
   function rebuildDates() {
     dateSelect.replaceChildren();
     const { year, month } = ymParts(curYm);
     const sats = saturdaysInMonth(year, month);
-    for (const s of sats) dateSelect.append(h("option", { value: s, selected: s === selDate }, `Saturday · ${s}`));
+    for (const s of sats) dateSelect.append(h("option", { value: s, selected: s === selDate }, `Saturday · ${ddMmmYyyy(s)}`));
     if (!sats.includes(selDate)) selDate = sats[0] ?? "";
     dateSelect.value = selDate;
-  }
-
-  function rebuildBanks() {
-    bankSeg.replaceChildren();
-    masters.batteryBanks.forEach((b, i) => {
-      bankSeg.append(h("button", { class: i === bankIdx ? "active" : "", onClick: () => { bankIdx = i; renderBank(); refreshSeg(); } },
-        shortBankName(b)));
-    });
-  }
-  function refreshSeg() {
-    bankSeg.querySelectorAll("button").forEach((btn, i) => btn.classList.toggle("active", i === bankIdx));
   }
 
   async function renderBank() {
     body.replaceChildren();
     if (!selDate) { body.append(h("div", { class: "list-empty" }, "No Saturdays in this month.")); return; }
-    const bank = masters.batteryBanks[bankIdx];
+    const bank = banks[bankIdx];
+    const isCCA = bank.measure === "CCA";
     const existing = await db.battery.where("[date+bankId]").equals([selDate, bank.id]).first();
     const readings: BatteryEntry["readings"] = bank.cellLabels.map((label: string, i: number) => {
       const r = existing?.readings?.[i];
-      return { label, aux: r?.aux ?? (bank.measure === "Sp. Grv" ? "N/A" : null), volt: r?.volt ?? null };
+      return { label, aux: r?.aux ?? (isCCA ? null : "N/A"), volt: r?.volt ?? null };
     });
-
+    let remarkVal = existing?.remark ?? "GOOD";
     const meta = await db.batteryMeta.get(bank.id);
+
+    // Description of the bank being entered.
     body.append(
-      h("div", { class: "card", style: { background: "var(--accent-d)" } },
+      h("div", { class: "card accent" },
         h("div", { style: { fontWeight: 700, marginBottom: "4px" } }, bank.desc),
         meta?.info ? h("div", { class: "hint" }, meta.info) : null)
     );
 
-    const measureIsVoltOnly = bank.measure !== "Sp. Grv";
-    for (let i = 0; i < readings.length; i++) {
-      const r = readings[i];
-      const voltInp = numInput({ value: r.volt ?? null, placeholder: "Volt",
-        onInput: debounce(async (v) => { readings[i].volt = v; await persist(); }, 300) });
-      let auxNode: Node | null = null;
-      if (bank.measure === "CCA") {
-        auxNode = numInput({ value: typeof r.aux === "number" ? r.aux : null, placeholder: "CCA",
-          onInput: debounce(async (v) => { readings[i].aux = v; await persist(); }, 300) });
-      }
-      body.append(
-        h("div", { class: "mrow" },
-          h("div", { class: "mname" }, r.label),
-          h("div", { style: { display: "flex", gap: "6px" } }, auxNode, voltInp))
-      );
+    // Live total (auto-summed from the cell voltages).
+    const totalVal = h("span", { class: "bt-val" }, "0");
+    function recalcTotal(): number {
+      const sum = readings.reduce((a, r) => a + (typeof r.volt === "number" ? (r.volt as number) : 0), 0);
+      totalVal.textContent = sum ? String(round2(sum)) : "0";
+      return sum;
     }
 
-    const totalInp = numInput({ value: existing?.total ?? null, placeholder: "Total Volts",
-      onInput: debounce(async (v) => { await persist(v); }, 300) });
-    const remarkSel = h("select", { onChange: async (e: Event) => { await persist(undefined, (e.target as HTMLSelectElement).value); } },
-      ...["GOOD", "SATISFACTORY", "WEAK", "RENEW"].map((x) => h("option", { value: x, selected: (existing?.remark ?? "GOOD") === x }, x)));
-    body.append(
-      h("label", { class: "field", style: { marginTop: "10px" } }, h("span", { class: "lab" }, "Total Volts"), totalInp),
-      h("label", { class: "field" }, h("span", { class: "lab" }, "Remarks"), remarkSel)
-    );
+    // Battery graphic: one tappable cell per 2V cell (or per battery for CCA).
+    const cols = readings.length <= 2 ? 2 : readings.length <= 6 ? 3 : 4;
+    const cellsWrap = h("div", { class: "batt-cells", style: { gridTemplateColumns: `repeat(${cols}, 1fr)` } });
+    readings.forEach((r, i) => {
+      const cell = h("div", { class: `cell ${r.volt != null ? "filled" : ""}` });
+      const voltInp = numInput({
+        value: r.volt ?? null, placeholder: "—",
+        onInput: debounce(async (v) => { readings[i].volt = v; cell.classList.toggle("filled", v != null); recalcTotal(); await persist(); }, 300),
+      });
+      cell.append(h("div", { class: "cnum" }, isCCA ? r.label : `Cell ${r.label}`), voltInp);
+      if (isCCA) {
+        const ccaInp = numInput({
+          value: typeof r.aux === "number" ? r.aux : null, placeholder: "CCA",
+          onInput: debounce(async (v) => { readings[i].aux = v; await persist(); }, 300),
+        });
+        ccaInp.classList.add("cca");
+        cell.append(ccaInp);
+      }
+      cellsWrap.append(cell);
+    });
 
-    async function persist(total?: number | null, remark?: string) {
+    const remarkSel = h("select", { onChange: async (e: Event) => { remarkVal = (e.target as HTMLSelectElement).value; await persist(); } },
+      ...["GOOD", "SATISFACTORY", "WEAK", "RENEW"].map((x) => h("option", { value: x, selected: remarkVal === x }, x)));
+
+    body.append(
+      h("div", { class: "batt" }, h("div", { class: "batt-shell" }, cellsWrap)),
+      h("div", { class: "batt-total" }, totalVal, h("span", { class: "bt-unit" }, "V"), h("span", { class: "bt-lab" }, "Total")),
+      h("label", { class: "field", style: { marginTop: "14px" } }, h("span", { class: "lab" }, "Remarks"), remarkSel)
+    );
+    recalcTotal();
+
+    async function persist() {
+      const sum = recalcTotal();
+      const anyVolt = readings.some((r) => typeof r.volt === "number");
       const cur = await db.battery.where("[date+bankId]").equals([selDate, bank.id]).first();
       const entry: BatteryEntry = {
-        id: cur?.id,
-        date: selDate,
-        bankId: bank.id,
-        readings,
-        total: total !== undefined ? total : cur?.total ?? null,
-        remark: remark !== undefined ? remark : cur?.remark ?? "GOOD",
+        id: cur?.id, date: selDate, bankId: bank.id, readings,
+        total: anyVolt ? round2(sum) : null, remark: remarkVal,
       };
       if (cur?.id) await db.battery.update(cur.id, entry);
       else await db.battery.add(entry);
-      toast("Saved", 800);
+      toast("Saved", 700);
     }
   }
 
@@ -102,12 +114,11 @@ export async function renderBattery(_p: Record<string, string>, mount: HTMLEleme
       dateSelect,
       h("div", { style: { height: "10px" } }),
       bankSeg,
-      h("div", { style: { height: "10px" } }),
+      h("div", { style: { height: "12px" } }),
       body
     )
   );
   rebuildDates();
-  rebuildBanks();
   await renderBank();
 }
 

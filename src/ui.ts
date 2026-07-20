@@ -174,8 +174,9 @@ export function segmented(opts: {
   onPick: (value: string, index: number) => void;
   labels?: string[];
   big?: boolean;
+  compact?: boolean;
 }): HTMLElement {
-  const { options, value, onPick, labels, big } = opts;
+  const { options, value, onPick, labels, big, compact } = opts;
   let activeIdx = Math.max(0, options.indexOf(value));
   const thumb = h("div", { class: "seg-thumb" });
   const btns = options.map((o, i) =>
@@ -195,7 +196,7 @@ export function segmented(opts: {
       labels?.[i] ?? o
     )
   );
-  const seg = h("div", { class: big ? "seg big" : "seg" }, thumb, ...btns);
+  const seg = h("div", { class: `seg${big ? " big" : ""}${compact ? " compact" : ""}` }, thumb, ...btns);
   seg.style.setProperty("--n", String(options.length));
   seg.style.setProperty("--i", String(activeIdx));
   return seg;

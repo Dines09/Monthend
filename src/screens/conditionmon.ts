@@ -1,4 +1,4 @@
-import { h, topbar, screen, numInput, toast } from "../ui";
+import { h, topbar, screen, numInput, toast, segmented } from "../ui";
 import { db } from "../db";
 import { masters } from "../seed";
 import { ym as ymOf, defaultReportYm, debounce } from "../util";
@@ -27,7 +27,7 @@ export async function renderConditionMon(_p: Record<string, string>, mount: HTML
         else await db.motorErTemp.put({ key: `conditionmon:${curYm}`, ym: curYm, source: "conditionmon", value: v });
       }, 350) });
     body.append(
-      h("div", { class: "card", style: { background: "var(--accent-d)" } },
+      h("div", { class: "card accent" },
         h("label", { class: "field", style: { marginBottom: 0 } },
           h("span", { class: "lab" }, "Engine Room Temperature (°C)"), erInp)),
       h("button", { class: "btn secondary", style: { marginBottom: "12px" }, onClick: copyTempFromTEC12 }, "⤵ Copy temps from TEC(A) 12")
@@ -108,15 +108,10 @@ export async function renderConditionMon(_p: Record<string, string>, mount: HTML
     load();
   }
 
-  const seg = h("div", { class: "seg" },
-    h("button", { class: "active", onClick: (e: Event) => setTab("temp", e) }, "Temperature"),
-    h("button", { onClick: (e: Event) => setTab("vib", e) }, "Vibration"));
-  function setTab(t: "temp" | "vib", e: Event) {
-    tab = t;
-    seg.querySelectorAll("button").forEach((b) => b.classList.remove("active"));
-    (e.target as HTMLElement).classList.add("active");
-    load();
-  }
+  const seg = segmented({
+    options: ["temp", "vib"], labels: ["Temperature", "Vibration"], value: tab,
+    onPick: (v) => { tab = v as "temp" | "vib"; load(); },
+  });
 
   mount.append(
     topbar("Condition Monitoring", "Electrical Motors", "/records"),

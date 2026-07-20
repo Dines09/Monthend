@@ -1,6 +1,6 @@
 import { h, topbar, screen, navigate } from "../ui";
 import { db } from "../db";
-import { isSaturday, isoDate, ym, monthLabel, saturdaysInMonth, ymParts, parseIso, MONTHS_SHORT } from "../util";
+import { isSaturday, isoDate, ym, saturdaysInMonth, ymParts, parseIso, MONTHS_SHORT, ddMmmYyyy } from "../util";
 import {
   motorTempStatus, vibrationStatus, busbarStatus, freonStatus, cmStatus, type RecStatus,
 } from "../status";
@@ -128,7 +128,7 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
     if (active === "daily") {
       listEl.append(
         cardLink("🌊", "ICCP / MGPS Reading",
-          todayIso + (iccpDone ? " · entered" : " · tap to enter today"), "/rec/iccp",
+          ddMmmYyyy(todayIso) + (iccpDone ? " · entered" : " · tap to enter today"), "/rec/iccp",
           iccpDone ? h("span", { class: "chip done" }, "✓") : h("span", { class: "chip due" }, "Due"))
       );
     } else if (active === "sat") {
@@ -163,8 +163,7 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
       });
       listEl.append(h("div", { class: "divider" }));
       listEl.append(
-        h("div", { class: "card tap", onClick: () => navigate("/export"),
-          style: { background: "var(--accent-d)", borderColor: "var(--accent)" } },
+        h("div", { class: "card tap accent", onClick: () => navigate("/export") },
           h("div", { class: "card-row" },
             h("div", { class: "icon" }, "⬇️"),
             h("div", { class: "body" }, h("div", { class: "title" }, "Export Month End"),
@@ -175,7 +174,7 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
   }
 
   mount.append(
-    topbar("Month End", `${await vesselName()} · ${todayIso}${sat ? " · SATURDAY" : ""}`),
+    topbar("Month End", `${await vesselName()} · ${ddMmmYyyy(todayIso)}${sat ? " · SATURDAY" : ""}`),
     screen(modebar, h("div", { style: { height: "6px" } }), listEl)
   );
   renderList();
@@ -183,7 +182,7 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
 
 function dayLabel(iso: string): string {
   const d = parseIso(iso);
-  return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`;
+  return `${String(d.getDate()).padStart(2, "0")} ${MONTHS_SHORT[d.getMonth()].toUpperCase()}`;
 }
 
 async function vesselName(): Promise<string> {

@@ -45,7 +45,7 @@ export async function renderFreon(_p: Record<string, string>, mount: HTMLElement
     // ROB computed preview
     const robPreview = await computeRob(curYm);
     body.append(
-      h("div", { class: "card", style: { background: "var(--accent-d)" } },
+      h("div", { class: "card accent" },
         h("div", { class: "hint" },
           `ROB last month: ${robPreview.robStart} kg`, h("br"),
           `Total consumed: ${robPreview.consumed} kg`, h("br"),

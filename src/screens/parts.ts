@@ -1,14 +1,20 @@
 import { h, navigate } from "../ui";
 import { MONTHS_FULL, ym as ymOf } from "../util";
 
-/** Month selector for the current seed year (defaults to a given year). */
-export function monthPicker(currentYm: string, onChange: (ym: string) => void, year = 2026): HTMLElement {
+/**
+ * Month selector for a year. Months after `maxYm` (default: the current
+ * calendar month) are disabled — you can't build a month-end for a month that
+ * hasn't happened yet.
+ */
+export function monthPicker(currentYm: string, onChange: (ym: string) => void, year = 2026, maxYm = ymOf(new Date())): HTMLElement {
   const sel = h("select", {
     onChange: (e: Event) => onChange((e.target as HTMLSelectElement).value),
   });
   for (let m = 1; m <= 12; m++) {
     const v = `${year}-${String(m).padStart(2, "0")}`;
-    sel.append(h("option", { value: v, selected: v === currentYm }, `${MONTHS_FULL[m - 1]} ${year}`));
+    const future = v > maxYm;
+    sel.append(h("option", { value: v, selected: v === currentYm, disabled: future || undefined },
+      `${MONTHS_FULL[m - 1]} ${year}${future ? " —" : ""}`));
   }
   return sel;
 }

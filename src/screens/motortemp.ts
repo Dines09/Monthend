@@ -29,7 +29,7 @@ export async function renderMotorTemp(_p: Record<string, string>, mount: HTMLEle
         else await db.motorErTemp.put({ key: `motortemp:${curYm}`, ym: curYm, source: "motortemp", value: v });
       }, 350) });
     listEl.append(
-      h("div", { class: "card", style: { background: "var(--accent-d)" } },
+      h("div", { class: "card accent" },
         h("label", { class: "field", style: { marginBottom: 0 } },
           h("span", { class: "lab" }, "Engine Room Temperature (°C)"), erInp))
     );

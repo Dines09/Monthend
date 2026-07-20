@@ -62,6 +62,12 @@ export function ddmmyyyy(iso: string): string {
   return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}`;
 }
 
+/** Human date as DD MMM YYYY (e.g. 2026-07-04 -> "04 JUL 2026"). */
+export function ddMmmYyyy(iso: string): string {
+  const d = parseIso(iso);
+  return `${String(d.getDate()).padStart(2, "0")} ${MONTHS_SHORT[d.getMonth()].toUpperCase()} ${d.getFullYear()}`;
+}
+
 /** Excel serial date number (1900 system) for a JS Date. */
 export function excelSerial(date: Date): number {
   const epoch = Date.UTC(1899, 11, 30);

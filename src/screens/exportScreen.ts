@@ -2,7 +2,7 @@ import JSZip from "jszip";
 import { h, topbar, screen, toast } from "../ui";
 import { RECORDS } from "../records";
 import { GENERATORS, type ExportResult } from "../export/generate";
-import { defaultReportYm, monthLabel, MONTHS_FULL, quarterWindow } from "../util";
+import { defaultReportYm, monthLabel, MONTHS_FULL, quarterWindow, ym as ymOf } from "../util";
 import { downloadBlob } from "./settings";
 
 export async function renderExport(_p: Record<string, string>, mount: HTMLElement) {
@@ -12,16 +12,33 @@ export async function renderExport(_p: Record<string, string>, mount: HTMLElemen
   const yearSel = h("select", {});
   const monthSel = h("select", {});
 
+  // Can't report a month that hasn't happened yet.
+  const nowYm = ymOf(new Date());
+  const nowYear = Number(nowYm.split("-")[0]);
   const year = Number(curYm.split("-")[0]);
-  for (let y = 2026; y <= 2028; y++) yearSel.append(h("option", { value: String(y), selected: y === year }, String(y)));
-  for (let m = 1; m <= 12; m++) monthSel.append(h("option", { value: String(m), selected: m === Number(curYm.split("-")[1]) }, MONTHS_FULL[m - 1]));
+  for (let y = 2026; y <= nowYear; y++) yearSel.append(h("option", { value: String(y), selected: y === year }, String(y)));
+
+  function rebuildMonths() {
+    monthSel.replaceChildren();
+    const y = Number(yearSel.value);
+    let sel = Number(curYm.split("-")[1]);
+    // Clamp selection if it lands on a disabled (future) month.
+    if (`${y}-${String(sel).padStart(2, "0")}` > nowYm) sel = Number(nowYm.split("-")[1]);
+    for (let m = 1; m <= 12; m++) {
+      const future = `${y}-${String(m).padStart(2, "0")}` > nowYm;
+      monthSel.append(h("option", { value: String(m), selected: m === sel, disabled: future || undefined },
+        `${MONTHS_FULL[m - 1]}${future ? " —" : ""}`));
+    }
+  }
 
   function syncYm() {
+    rebuildMonths();
     curYm = `${yearSel.value}-${String(monthSel.value).padStart(2, "0")}`;
     renderFiles();
   }
   yearSel.addEventListener("change", syncYm);
   monthSel.addEventListener("change", syncYm);
+  rebuildMonths();
 
   function renderFiles() {
     fileList.replaceChildren();
@@ -83,8 +100,8 @@ export async function renderExport(_p: Record<string, string>, mount: HTMLElemen
   mount.append(
     topbar("Export Month End", "Download Excel files"),
     screen(
-      h("div", { class: "card", style: { background: "var(--accent-d)" } },
-        h("div", { class: "lab", style: { color: "var(--muted)", fontSize: "13px", marginBottom: "8px", fontWeight: 600 } }, "Reporting month"),
+      h("div", { class: "card accent" },
+        h("div", { class: "lab", style: { fontSize: "13px", marginBottom: "8px", fontWeight: 600 } }, "Reporting month"),
         h("div", { style: { display: "flex", gap: "10px" } }, monthSel, yearSel)),
       exportAllBtn,
       h("p", { class: "hint", style: { textAlign: "center", margin: "12px 0" } }, "or download individual files:"),

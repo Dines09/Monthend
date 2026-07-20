@@ -23,9 +23,10 @@ const READING_KEYS: (keyof IccpDaily)[] = ["draft", "seaTemp", "amp", "volt", "c
 
 export async function renderIccp(_p: Record<string, string>, mount: HTMLElement) {
   const today = new Date();
+  const todayIso = isoDate(today);
   // default to current month for daily entry
   let curYm = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
-  let selDate = isoDate(today);
+  let selDate = todayIso;
   let editingMgps = false;
   let lastComplete = false;
 
@@ -60,8 +61,11 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
     ringWrap.replaceChildren(progressRing(done, total, "left"));
     const complete = total > 0 && done >= total;
     if (fireOnComplete && complete && !lastComplete) {
-      const n = Number(selDate.slice(-2));
-      achievement("Daily reading complete!", `ICCP / MGPS saved for Day ${n}`);
+      const when = selDate === todayIso ? "today" : `Day ${Number(selDate.slice(-2))}`;
+      // Dismiss the on-screen keyboard first, then celebrate ~1.3s later so the
+      // tick lands centered instead of being shoved up by the keyboard.
+      (document.activeElement as HTMLElement | null)?.blur?.();
+      setTimeout(() => achievement("Entry completed!", `ICCP / MGPS saved for ${when}`), 1300);
     }
     lastComplete = complete;
   }
@@ -196,6 +200,17 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
     );
 
     form.append(prefilled, readings);
+
+    // If this day is already fully entered, show a persistent "completed" banner
+    // at the top when re-opening it (distinct from the one-time celebration).
+    const prog = progressOf(rec);
+    if (prog.total > 0 && prog.done >= prog.total) {
+      const when = selDate === todayIso ? "today" : `Day ${Number(selDate.slice(-2))}`;
+      form.prepend(h("div", { class: "done-banner" },
+        h("span", { class: "db-tick" }, "✓"),
+        h("span", {}, `Entry completed for ${when}`)));
+    }
+
     await refreshRing(false);
   }
 
