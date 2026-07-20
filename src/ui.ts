@@ -106,7 +106,9 @@ function moveNavPill(btn: HTMLElement | null) {
     pill.style.opacity = "1";
     pill.style.width = `${btn.offsetWidth}px`;
     pill.style.height = `${btn.offsetHeight}px`;
-    pill.style.transform = `translateX(${btn.offsetLeft}px)`;
+    // Position exactly over the active button box (offsetLeft/Top are relative
+    // to the dock, so the highlight sits evenly around the icon + label).
+    pill.style.transform = `translate(${btn.offsetLeft}px, ${btn.offsetTop}px)`;
   };
   // Wait a frame if layout isn't measured yet (first paint).
   if (btn.offsetWidth) place();

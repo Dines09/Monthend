@@ -35,7 +35,7 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
     const dim = new Date(year, month, 0).getDate();
     for (let d = 1; d <= dim; d++) {
       const iso = `${curYm}-${String(d).padStart(2, "0")}`;
-      daySelect.append(h("option", { value: iso, selected: iso === selDate }, `Day ${d} · ${iso}`));
+      daySelect.append(h("option", { value: iso, selected: iso === selDate }, `Day ${d}`));
     }
     if (!selDate.startsWith(curYm)) { selDate = `${curYm}-01`; daySelect.value = selDate; }
   }
@@ -83,7 +83,8 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
 
     form.replaceChildren();
 
-    const field = (lab: string, node: Node) => h("label", { class: "field" }, h("span", { class: "lab" }, lab), node);
+    // Big, glove-friendly labelled field.
+    const field = (lab: string, node: Node) => h("label", { class: "field big" }, h("span", { class: "lab" }, lab), node);
     const nf = (key: keyof IccpDaily) =>
       numInput({
         value: (rec[key] as number) ?? null,
@@ -91,43 +92,62 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
         onInput: debounce((v) => save({ [key]: v }), 300),
       });
 
-    const areaSel = h("select", { onChange: async (e: Event) => { await save({ area: (e.target as HTMLSelectElement).value }); await loadDay(); } },
-      ...AREAS.map((a) => h("option", { value: a, selected: area === a }, a)));
+    // Segmented control — big tappable choices instead of a tiny dropdown.
+    const segment = (opts: string[], current: string, onPick: (v: string) => void) =>
+      h("div", { class: "seg big" },
+        ...opts.map((o) => h("button", { type: "button", class: o === current ? "active" : "",
+          onClick: () => { if (o !== current) onPick(o); } }, o)));
+
+    const areaSeg = segment(AREAS, area, async (v) => { await save({ area: v }); await loadDay(); });
     // Changing the sea chest re-derives the MGPS readings, so clear the old
     // auto-filled cu/al before reloading (loadDay only fills when unset).
-    const seaChestSel = h("select", { onChange: async (e: Event) => {
-      const v = (e.target as HTMLSelectElement).value;
+    const chestSeg = segment(SEA_CHESTS, seaChest, async (v) => {
       await save({ seaChest: v, cu1: undefined, al1: undefined, cu2: undefined, al2: undefined });
       await loadDay();
-    } },
-      ...SEA_CHESTS.map((a) => h("option", { value: a, selected: seaChest === a }, a)));
+    });
 
-    const shaftField = stationary
-      ? field("Shaft potential (mV)", numInput({ value: 0, readonly: true, onInput: () => {} }))
-      : field("Shaft potential (mV)", nf("shaftMv"));
+    // Read-only tile showing an auto-derived value (MGPS + locked shaft).
+    const tile = (lab: string, val: number | null, unit?: string) =>
+      h("div", { class: "tile" },
+        h("div", { class: "tval" }, val == null ? "—" : String(val), unit ? h("span", { class: "tunit" }, unit) : null),
+        h("div", { class: "tlab" }, lab));
 
-    form.append(
+    // ---- Section 1: prefilled / auto values (verify at a glance) ----
+    const prefilled = h("div", { class: "card group" },
+      h("div", { class: "group-hdr" }, h("span", {}, "Auto-filled"), h("span", { class: "group-note" }, "carried forward · tap to change")),
+      field("Area of operation", areaSeg),
+      field("Sea chest in use", chestSeg),
+      h("div", { class: "tlabhdr" }, "Anti-fouling MGPS (Amp)"),
+      h("div", { class: "tilegrid" },
+        tile("CU 1", rec.cu1 ?? null), tile("AL 1", rec.al1 ?? null),
+        tile("CU 2", rec.cu2 ?? null), tile("AL 2", rec.al2 ?? null)),
+      stationary
+        ? h("div", {},
+            h("div", { class: "tlabhdr" }, "Shaft Earthing"),
+            h("div", { class: "tilegrid one" }, tile("Shaft potential", 0, "mV")),
+            h("div", { class: "hint", style: { marginTop: "2px" } }, `At ${area.toLowerCase()} — shaft not turning, so 0 mV.`))
+        : null,
+    );
+
+    // ---- Section 2: today's varying readings (user enters) ----
+    const readings = h("div", { class: "card group" },
+      h("div", { class: "group-hdr" }, h("span", {}, "Today's readings"), h("span", { class: "group-note" }, "enter values")),
       h("div", { class: "grid2" },
-        field("Area of operation", areaSel),
-        field("Draft (M)", nf("draft"))),
-      h("div", { class: "grid2" },
-        field("Sea temp (°C)", nf("seaTemp")),
-        field("Sea chest in use", seaChestSel)),
-      h("h2", { style: { marginLeft: 0 } }, "ICCP System"),
+        field("Draft (M)", nf("draft")),
+        field("Sea temp (°C)", nf("seaTemp"))),
+      h("div", { class: "tlabhdr" }, "ICCP System"),
       h("div", { class: "grid2" },
         field("Output Amp", nf("amp")),
         field("Output Volt", nf("volt"))),
       h("div", { class: "grid2" },
         field("Sensing Cell 1 (mV)", nf("cell1")),
         field("Sensing Cell 2 (mV)", nf("cell2"))),
-      h("h2", { style: { marginLeft: 0 } }, "Anti-fouling MGPS (Amp)"),
-      h("div", { class: "grid2" },
-        field("CU1", nf("cu1")), field("AL1", nf("al1"))),
-      h("div", { class: "grid2" },
-        field("CU2", nf("cu2")), field("AL2", nf("al2"))),
-      h("h2", { style: { marginLeft: 0 } }, "Shaft Earthing"),
-      shaftField
+      stationary ? null : h("div", {},
+        h("div", { class: "tlabhdr" }, "Shaft Earthing"),
+        field("Shaft potential (mV)", nf("shaftMv"))),
     );
+
+    form.append(prefilled, readings);
   }
 
   async function save(patch: Partial<IccpDaily>, silent = false) {

@@ -1,6 +1,7 @@
 import { h, topbar, screen, toast, navigate } from "../ui";
 import { db, getSetting, setSetting } from "../db";
 import { debounce } from "../util";
+import { hapticsEnabled, setHaptics, tapFeedback } from "../feedback";
 
 export async function renderSettings(_p: Record<string, string>, mount: HTMLElement) {
   const vessel = await getSetting("vessel", "SEAWAYS MIRAGE");
@@ -18,6 +19,17 @@ export async function renderSettings(_p: Record<string, string>, mount: HTMLElem
       field("Vessel name (headers)", txt("vessel", vessel)),
       field("Vessel name (M.T. …)", txt("vesselMT", vesselMT)),
       field("Checked / Prepared by", txt("checkedBy", checkedBy)),
+
+      h("h2", { style: { marginLeft: 0 } }, "Feedback"),
+      h("label", { class: "toggle-row" },
+        h("div", {},
+          h("div", { class: "title" }, "Tap sound & vibration"),
+          h("div", { class: "desc" }, "Light click + buzz when navigating")),
+        (() => {
+          const cb = h("input", { type: "checkbox", class: "switch", checked: hapticsEnabled(),
+            onChange: (e: Event) => { const on = (e.target as HTMLInputElement).checked; setHaptics(on); if (on) tapFeedback(); } });
+          return cb;
+        })()),
 
       h("h2", { style: { marginLeft: 0 } }, "Data"),
       h("div", { class: "card" },
@@ -38,7 +50,8 @@ export async function renderSettings(_p: Record<string, string>, mount: HTMLElem
             h("div", { class: "desc" }, `Built ${__BUILD_DATE__}`)),
           h("span", { class: "chip done", style: { fontSize: "14px" } }, `v${__APP_VERSION__}`))),
 
-      h("p", { class: "hint", style: { marginTop: "20px", textAlign: "center" } }, "Month End PWA · works offline once installed")
+      h("p", { class: "hint", style: { marginTop: "20px", textAlign: "center" } },
+        "This web app is developed by ETO.", h("br"), "Month End PWA · works offline once installed")
     )
   );
 }

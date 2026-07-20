@@ -120,38 +120,62 @@ body {
 .dock {
   position: relative;
   pointer-events: auto;
-  display: flex; gap: 2px;
-  padding: 7px 8px;
-  border-radius: 22px;
+  display: flex; gap: 4px;
+  padding: 8px 10px;
+  border-radius: 24px;
   background: var(--dock-bg);
   border: 1px solid var(--dock-line);
   box-shadow: 0 10px 30px rgba(0,0,0,.38), 0 2px 6px rgba(0,0,0,.25);
   -webkit-backdrop-filter: blur(16px) saturate(1.4);
   backdrop-filter: blur(16px) saturate(1.4);
-  max-width: calc(100vw - 24px);
+  max-width: calc(100vw - 16px);
 }
-/* sliding highlight pill behind the active item */
+/* sliding highlight pill behind the active item — anchored at the dock's
+   border origin (0,0); JS translates it to the active button's offset so it
+   sits evenly around the icon + label on all four sides. */
 .dock .nav-pill {
-  position: absolute; left: 8px; top: 7px;
+  position: absolute; left: 0; top: 0;
   border-radius: 16px; background: var(--dock-pill);
   opacity: 0; z-index: 0;
   transition: transform .32s cubic-bezier(.22,.9,.3,1), width .32s cubic-bezier(.22,.9,.3,1), opacity .2s;
 }
 .bottomnav button {
   position: relative; z-index: 1;
-  min-width: 62px; background: none; border: none; color: var(--muted);
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
-  font-size: 11px; font-weight: 600; padding: 8px 4px 7px;
+  min-width: 72px; background: none; border: none; color: var(--muted);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  font-size: 11px; font-weight: 600; padding: 9px 8px 8px;
   border-radius: 16px;
   transition: color .2s, transform .12s;
 }
 .bottomnav button:active { transform: scale(.9); }
-.bottomnav button .ic { font-size: 22px; line-height: 1; }
+.bottomnav button .ic { font-size: 23px; line-height: 1; }
 .bottomnav button.active { color: var(--accent); }
 
 input.locked, textarea.locked {
   opacity: .75; color: var(--muted); cursor: not-allowed;
 }
+
+/* settings toggle row + iOS-style switch */
+.toggle-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+  padding: 14px 16px; margin-bottom: 12px; cursor: pointer;
+}
+.toggle-row .title { font-weight: 700; font-size: 15px; }
+.toggle-row .desc { color: var(--muted); font-size: 13px; margin-top: 2px; }
+input.switch {
+  appearance: none; -webkit-appearance: none;
+  width: 50px; height: 30px; flex: 0 0 auto; border-radius: 999px;
+  background: var(--line); border: none; position: relative; cursor: pointer;
+  transition: background .2s; padding: 0;
+}
+input.switch::after {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px;
+  border-radius: 50%; background: #fff; transition: transform .2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,.3);
+}
+input.switch:checked { background: var(--good); }
+input.switch:checked::after { transform: translateX(20px); }
 
 /* ---- forms ---- */
 label.field { display: block; margin-bottom: 14px; }
@@ -166,6 +190,46 @@ select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmln
 
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+
+/* ---- big glove-friendly fields ---- */
+label.field.big { margin-bottom: 16px; }
+label.field.big .lab { font-size: 14px; margin-bottom: 8px; }
+label.field.big > input {
+  font-size: 20px; font-weight: 600; padding: 16px 16px; border-radius: 14px;
+  text-align: center;
+}
+label.field.big > input:focus { box-shadow: 0 0 0 3px rgba(56,182,255,.18); }
+
+/* grouped card sections */
+.card.group { padding: 16px 16px 6px; }
+.group-hdr {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  margin: -2px 0 14px; padding-bottom: 12px; border-bottom: 1px solid var(--line);
+}
+.group-hdr > span:first-child {
+  font-size: 15px; font-weight: 800; letter-spacing: .3px; color: var(--text);
+  text-transform: uppercase;
+}
+.group-hdr .group-note { font-size: 12px; color: var(--muted); font-weight: 600; }
+.tlabhdr {
+  font-size: 12px; color: var(--accent); font-weight: 700; text-transform: uppercase;
+  letter-spacing: .6px; margin: 6px 0 10px;
+}
+
+/* big segmented control (Area / Sea chest) */
+.seg.big { border-radius: 14px; }
+.seg.big button { padding: 15px 6px; font-size: 17px; font-weight: 700; }
+
+/* read-only value tiles (MGPS, locked shaft) */
+.tilegrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+.tilegrid.one { grid-template-columns: 1fr; }
+.tile {
+  background: var(--bg2); border: 1px solid var(--line); border-radius: 14px;
+  padding: 14px 12px; text-align: center;
+}
+.tile .tval { font-size: 24px; font-weight: 800; color: var(--text); line-height: 1.1; }
+.tile .tval .tunit { font-size: 13px; font-weight: 600; color: var(--muted); margin-left: 4px; }
+.tile .tlab { font-size: 12px; color: var(--muted); font-weight: 700; margin-top: 4px; text-transform: uppercase; letter-spacing: .5px; }
 
 /* motor list rows */
 .mrow {

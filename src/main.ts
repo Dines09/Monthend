@@ -1,5 +1,6 @@
 import "./style.css";
 import { h, initRouter, route, navigate, initTheme } from "./ui";
+import { tapFeedback } from "./feedback";
 import { ensureSeeded } from "./seed";
 import { renderToday } from "./screens/today";
 import { renderRecords } from "./screens/records";
@@ -19,7 +20,7 @@ const app = document.getElementById("app")!;
 
 function bottomNav(): HTMLElement {
   const item = (r: string, ic: string, label: string) =>
-    h("button", { "data-route": r, onClick: () => navigate(r) }, h("span", { class: "ic" }, ic), label);
+    h("button", { "data-route": r, onClick: () => { tapFeedback(); navigate(r); } }, h("span", { class: "ic" }, ic), label);
   // Sliding highlight pill that moves under the active item (macOS-dock feel).
   const pill = h("div", { class: "nav-pill" });
   return h(
