@@ -5,6 +5,12 @@ import { isoDate, defaultReportYm, ymParts, debounce, parseIso, saturdaysInMonth
 const AREAS = ["Sea", "Port", "Anchor"];
 const SEA_CHESTS = ["P", "S", "P/S"];
 
+// Calendar day colouring by where the ship was that day. The class is added to
+// the day circle; the actual colours live in style.css (theme-aware).
+//   Sea → light blue · Port → green · Anchor → orange
+const AREA_CLASS: Record<string, string> = { Sea: "a-sea", Port: "a-port", Anchor: "a-anchor" };
+const LEGEND: [string, string][] = [["a-sea", "Sea"], ["a-port", "Port"], ["a-anchor", "Anchor"]];
+
 // Anti-fouling MGPS readings depend on which sea chest is in use.
 // P: Cu1 leads; S: readings swap between the two cells.
 const MGPS: Record<string, { cu1: number; al1: number; cu2: number; al2: number }> = {
@@ -37,6 +43,28 @@ const SPECS: Partial<Record<keyof IccpDaily, ReadingSpec>> = {
 // block (Output Amp -> Output Volt -> Sensing Cell 1 -> Sensing Cell 2), shaft.
 const ADVANCE_ORDER: (keyof IccpDaily)[] = ["draft", "seaTemp", "amp", "volt", "cell1", "cell2", "shaftMv"];
 
+// Count of today's reading fields already filled (for the progress ring and the
+// calendar's "done" tick). A field only counts when its value is present AND
+// within the valid range, so a half-typed / out-of-range last reading won't trip
+// the "completed" state early. Shaft potential only counts when under way.
+function progressOf(saved: IccpDaily | undefined): { done: number; total: number } {
+  const area = saved?.area ?? "Sea";
+  const stationary = STATIONARY.has(area);
+  const keys = stationary ? READING_KEYS : [...READING_KEYS, "shaftMv" as keyof IccpDaily];
+  const done = keys.filter((k) => {
+    const v = saved?.[k];
+    if (v == null) return false;
+    const spec = SPECS[k];
+    return !spec || (typeof v === "number" && v >= spec.min && v <= spec.max);
+  }).length;
+  return { done, total: keys.length };
+}
+
+function isComplete(saved: IccpDaily | undefined): boolean {
+  const { done, total } = progressOf(saved);
+  return total > 0 && done >= total;
+}
+
 export async function renderIccp(_p: Record<string, string>, mount: HTMLElement) {
   const today = new Date();
   const todayIso = isoDate(today);
@@ -48,6 +76,7 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
 
   const form = h("div", {});
   const ringWrap = h("div", {});
+  const calWrap = h("div", { class: "cal" });
   const monthlyBtn = h("button", { class: "btn ghost", style: { marginTop: "16px" }, onClick: () => openMonthly(curYm) }, "Monthly footer (observations, slipring, remark)");
 
   // Keep the selected day inside the current month (clamp when the month changes).
@@ -55,27 +84,13 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
     if (!selDate.startsWith(curYm)) selDate = `${curYm}-01`;
   }
 
-  // Count of today's reading fields already filled (for the progress ring). A
-  // field only counts when its value is present AND within the valid range, so a
-  // half-typed / out-of-range last reading won't trip the "completed" tick early.
-  function progressOf(saved: IccpDaily | undefined): { done: number; total: number } {
-    const area = saved?.area ?? "Sea";
-    const stationary = STATIONARY.has(area);
-    const keys = stationary ? READING_KEYS : [...READING_KEYS, "shaftMv" as keyof IccpDaily];
-    const done = keys.filter((k) => {
-      const v = saved?.[k];
-      if (v == null) return false;
-      const spec = SPECS[k];
-      return !spec || (typeof v === "number" && v >= spec.min && v <= spec.max);
-    }).length;
-    return { done, total: keys.length };
-  }
-
   async function refreshRing(fireOnComplete: boolean) {
     const saved = await db.iccpDaily.get(selDate);
     const { done, total } = progressOf(saved);
     ringWrap.replaceChildren(progressRing(done, total, "left"));
     const complete = total > 0 && done >= total;
+    // Keep the calendar's colour + done-tick for this day in sync after an edit.
+    void refreshCalendar();
     if (fireOnComplete && complete && !lastComplete) {
       const when = selDate === todayIso ? "today" : `Day ${Number(selDate.slice(-2))}`;
       // Dismiss the on-screen keyboard first, then wait ~1.2s after the last
@@ -267,9 +282,9 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
   }
 
   // ---- header chips: tapping either opens an iOS-style wheel picker ----
-  const dayLabel = h("div", { class: "dnum" });
-  const dayBig = h("button", { class: "daybig", type: "button", onClick: openDayWheel }, dayLabel);
-  function syncDayLabel() { dayLabel.textContent = `Day ${Number(selDate.slice(-2))}`; }
+  // The selected-day label lives in the "Today's readings" flow now; the calendar
+  // shows which day is active. Kept as a no-op sync point for the header title.
+  function syncDayLabel() { /* calendar highlight shows the selected day */ }
 
   const monthLabel = h("div", { class: "mnum" });
   const monthChip = h("button", { class: "monthchip", type: "button", onClick: openMonthWheel }, monthLabel);
@@ -278,22 +293,8 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
     monthLabel.textContent = `${MONTHS_FULL[month - 1]} ${curYm.slice(0, 4)}`;
   }
 
-  // Day wheel: "Day" fixed label + the days of the current month scrolling.
-  function openDayWheel() {
-    const { year, month } = ymParts(curYm);
-    const dim = new Date(year, month, 0).getDate();
-    const maxDay = curYm === todayIso.slice(0, 7) ? Number(todayIso.slice(-2)) : dim;
-    const options = Array.from({ length: dim }, (_, i) => {
-      const d = i + 1;
-      return { value: `${curYm}-${String(d).padStart(2, "0")}`, text: String(d), disabled: d > maxDay };
-    }).filter((o) => !o.disabled);
-    wheelPicker({
-      columns: [{ label: "Day", options, value: selDate }],
-      onDone: ([iso]) => { selDate = iso; syncDayLabel(); loadDay(); },
-    });
-  }
-
-  // Month wheel: months scroll, the year stays fixed beside them.
+  // Month wheel: months scroll, the year stays fixed beside them. Changing the
+  // month rebuilds the calendar and clamps the selected day into the new month.
   function openMonthWheel() {
     const year = today.getFullYear();
     const maxM = today.getMonth() + 1; // don't allow future months
@@ -302,31 +303,97 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
     }));
     wheelPicker({
       columns: [{ label: String(year), options, value: curYm }],
-      onDone: ([ym]) => { curYm = ym; syncMonthLabel(); rebuildDays(); syncDayLabel(); loadDay(); },
+      onDone: ([ym]) => {
+        curYm = ym; syncMonthLabel(); rebuildDays(); syncDayLabel();
+        void buildCalendar(); loadDay();
+      },
     });
+  }
+
+  // Switch to a specific ISO day (used by the calendar taps and swipe). Handles
+  // crossing into another month and refreshes the header + calendar highlight.
+  function selectDay(iso: string, buzz = true) {
+    if (iso > todayIso) { toast("That's in the future", 1200); return; }
+    if (iso === selDate) return;
+    const nextYm = iso.slice(0, 7);
+    selDate = iso;
+    if (nextYm !== curYm) { curYm = nextYm; rebuildDays(); syncMonthLabel(); void buildCalendar(); }
+    syncDayLabel();
+    markSelectedDay();
+    loadDay();
+    if (buzz && navigator.vibrate) { try { navigator.vibrate(8); } catch { /* ignore */ } }
   }
 
   // Move by ±1 day, crossing month boundaries within the visible year.
   function goDay(delta: number) {
-    const next = new Date(parseIso(selDate).getTime() + delta * 86400000);
-    const nextIso = isoDate(next);
-    const nextYm = nextIso.slice(0, 7);
-    // Don't navigate into the future or before the seeded history year.
-    if (nextIso > todayIso) { toast("That's in the future", 1200); return; }
-    selDate = nextIso;
-    if (nextYm !== curYm) { curYm = nextYm; rebuildDays(); syncMonthLabel(); }
-    syncDayLabel();
-    loadDay();
-    if (navigator.vibrate) { try { navigator.vibrate(8); } catch { /* ignore */ } }
+    const nextIso = isoDate(new Date(parseIso(selDate).getTime() + delta * 86400000));
+    selectDay(nextIso);
   }
 
-  // Combined sticky header: month chip + big Day N + progress ring. A scrolled
-  // class (toggled below) promotes the Day label and shrinks the month chip so
-  // the day becomes the focal point when the user scrolls into the readings.
+  // ---- month calendar (day circles, coloured by area, ✓ on completed days) ----
+  // Build the whole grid for the current month once; refreshCalendar() only
+  // recolours/re-ticks the cells afterwards so an edit doesn't rebuild the DOM.
+  const dayCells = new Map<string, HTMLButtonElement>();
+
+  async function buildCalendar() {
+    const { year, month } = ymParts(curYm);
+    const dim = new Date(year, month, 0).getDate();
+    // JS getDay(): 0=Sun..6=Sat. We lay the grid out Monday-first, so shift Sun
+    // to the end (Mon=0 .. Sun=6) to know how many leading blanks the 1st needs.
+    const firstDow = (new Date(year, month - 1, 1).getDay() + 6) % 7;
+
+    const dow = h("div", { class: "cal-dow" },
+      ...["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((d) => h("span", {}, d)));
+    const grid = h("div", { class: "cal-grid" });
+    dayCells.clear();
+    for (let i = 0; i < firstDow; i++) grid.append(h("span", { class: "cal-blank" }));
+    for (let d = 1; d <= dim; d++) {
+      const iso = `${curYm}-${String(d).padStart(2, "0")}`;
+      const future = iso > todayIso;
+      const cell = h("button", {
+        class: "cal-day", type: "button", disabled: future || undefined,
+        "aria-label": `Day ${d}`,
+        onClick: () => selectDay(iso),
+      }, h("span", { class: "cd-n" }, String(d)), h("span", { class: "cd-tick" }, "✓"));
+      dayCells.set(iso, cell);
+      grid.append(cell);
+    }
+
+    const legend = h("div", { class: "cal-legend" },
+      ...LEGEND.map(([cls, lab]) => h("span", { class: "leg" },
+        h("span", { class: `leg-dot ${cls}` }), lab)),
+      h("span", { class: "leg" }, h("span", { class: "leg-dot leg-done" }, "✓"), "Done"));
+
+    calWrap.replaceChildren(dow, grid, legend);
+    markSelectedDay();
+    await refreshCalendar();
+  }
+
+  // Recolour each day by that day's area and add the ✓ badge to completed days.
+  async function refreshCalendar() {
+    if (dayCells.size === 0) return;
+    const rows = await db.iccpDaily
+      .where("date").between(`${curYm}-00`, `${curYm}-99`).toArray();
+    const byDate = new Map(rows.map((r) => [r.date, r]));
+    for (const [iso, cell] of dayCells) {
+      const rec = byDate.get(iso);
+      cell.classList.remove("a-sea", "a-port", "a-anchor", "done");
+      const areaCls = rec?.area ? AREA_CLASS[rec.area] : null;
+      if (areaCls) cell.classList.add(areaCls);
+      if (isComplete(rec)) cell.classList.add("done");
+    }
+  }
+
+  function markSelectedDay() {
+    for (const [iso, cell] of dayCells) cell.classList.toggle("sel", iso === selDate);
+  }
+
+  // Header: month chip (opens month wheel) + progress ring, then the calendar.
   const dayhead = h("div", { class: "dayhead" },
-    h("div", { class: "dh-month" }, monthChip),
-    h("div", { class: "dh-day" }, dayBig),
-    h("div", { class: "dh-ring" }, ringWrap),
+    h("div", { class: "dh-top" },
+      h("div", { class: "dh-month" }, monthChip),
+      h("div", { class: "dh-ring" }, ringWrap)),
+    calWrap,
   );
 
   mount.append(
@@ -369,25 +436,10 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
   view.addEventListener("pointerdown", (e) => { if (e.pointerType !== "touch") onStart(e.clientX, e.clientY, e.target); });
   view.addEventListener("pointerup", (e) => { if (e.pointerType !== "touch") onEnd(e.clientX, e.clientY); });
 
-  // ---- scroll-linked header: promote Day N as the user scrolls down ----
-  let scrolled = false;
-  const onScroll = () => {
-    const s = window.scrollY > 40;
-    if (s !== scrolled) { scrolled = s; dayhead.classList.toggle("scrolled", s); }
-  };
-  window.addEventListener("scroll", onScroll, { passive: true });
-  // Clean up the listener when we leave this screen (next route clears #view).
-  const mo = new MutationObserver(() => {
-    if (!document.body.contains(dayhead)) {
-      window.removeEventListener("scroll", onScroll);
-      mo.disconnect();
-    }
-  });
-  mo.observe(document.getElementById("view")!, { childList: true });
-
   rebuildDays();
   syncDayLabel();
   syncMonthLabel();
+  await buildCalendar();
   await loadDay();
 }
 

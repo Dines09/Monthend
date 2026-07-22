@@ -25,6 +25,11 @@
   --safety-d: rgba(245, 135, 31, .16);
   --on-accent: #eaf6ff;
   --on-accent-muted: rgba(234, 246, 255, .72);
+  /* Calendar day colours by ship area (dark theme): saturated fills, dark text
+     so the day number stays readable on the coloured circle. */
+  --cal-sea: #4cc4f0;    --cal-sea-fg: #06283a;
+  --cal-port: #35c07a;   --cal-port-fg: #05301c;
+  --cal-anchor: #f5901f; --cal-anchor-fg: #3d2405;
 }
 
 :root[data-theme="light"] {
@@ -53,6 +58,11 @@
   /* accent-d stays a dark blue in light theme too, so keep text light on it */
   --on-accent: #eaf6ff;
   --on-accent-muted: rgba(234, 246, 255, .78);
+  /* Calendar day colours by ship area (light theme): slightly deeper fills with
+     white text so the number reads clearly against the coloured circle. */
+  --cal-sea: #1f9fd6;    --cal-sea-fg: #ffffff;
+  --cal-port: #1f9d5c;   --cal-port-fg: #ffffff;
+  --cal-anchor: #e2720b; --cal-anchor-fg: #ffffff;
 }
 
 html { transition: background .2s; }
@@ -346,16 +356,16 @@ select.dayselect {
   padding-left: 34px; /* balance the arrow so the label stays centered */
 }
 
-/* ---- ICCP combined sticky header (month · Day N · ring) ---- */
+/* ---- ICCP sticky header: month chip + ring, then the month calendar ---- */
 .dayhead {
   position: sticky; top: calc(var(--top-h) + env(safe-area-inset-top)); z-index: 10;
   background: var(--bg); padding: 8px 0 10px; margin: -4px 0 8px;
-  display: grid; grid-template-columns: 1fr auto auto; align-items: center;
-  gap: 10px 12px; transition: gap .3s;
 }
-.dayhead .dh-month { min-width: 0; transition: opacity .3s, max-height .3s, transform .3s; }
-.dayhead .dh-day { grid-column: 2; }
-.dayhead .dh-ring { grid-column: 3; }
+.dayhead .dh-top {
+  display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px;
+  margin-bottom: 12px;
+}
+.dayhead .dh-month { min-width: 0; }
 .monthchip {
   width: 100%; text-align: left;
   background: var(--bg2); border: 1px solid var(--line); color: var(--text);
@@ -364,29 +374,75 @@ select.dayselect {
 }
 .monthchip::after { content: "▾"; color: var(--muted); font-size: 12px; }
 .monthchip:active { filter: brightness(.95); }
-.daybig {
-  background: var(--card2); border: 1px solid var(--line); color: var(--text);
-  border-radius: 14px; padding: 9px 16px; width: auto;
-  display: flex; align-items: center; gap: 6px;
-  transition: transform .3s, padding .3s, background .2s;
-}
-.daybig:active { transform: scale(.96); }
-.daybig .dnum { font-weight: 800; font-size: 17px; letter-spacing: .2px; line-height: 1.1; }
 
-/* Scrolled state: the month row collapses away and the Day chip grows and slides
-   to the left to become the primary anchor for swiping between days. */
-.dayhead.scrolled { grid-template-columns: 1fr auto; }
-.dayhead.scrolled .dh-month {
-  opacity: 0; max-height: 0; transform: translateY(-6px); pointer-events: none;
-  overflow: hidden; position: absolute;
+/* ---- month calendar ---- */
+.cal {
+  background: var(--bg2); border: 1px solid var(--line);
+  border-radius: 16px; padding: 12px 12px 10px;
 }
-.dayhead.scrolled .dh-day { grid-column: 1; justify-self: start; }
-.dayhead.scrolled .dh-ring { grid-column: 2; }
-.dayhead.scrolled .daybig {
-  background: var(--accent); border-color: var(--accent); color: var(--btn-fg);
-  padding: 11px 20px;
+.cal-dow, .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); }
+.cal-dow {
+  gap: 2px; margin-bottom: 6px;
 }
-.dayhead.scrolled .daybig .dnum { font-size: 20px; }
+.cal-dow span {
+  text-align: center; font-size: 11px; font-weight: 700; letter-spacing: .3px;
+  color: var(--muted); text-transform: uppercase;
+}
+.cal-grid { gap: 6px 2px; }
+.cal-blank { aspect-ratio: 1; }
+.cal-day {
+  position: relative; aspect-ratio: 1; width: 100%; margin: 0 auto; max-width: 42px;
+  justify-self: center;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; border: 1.5px solid transparent;
+  background: var(--card2); color: var(--text);
+  font-size: 15px; font-weight: 700; line-height: 1;
+  transition: transform .12s, box-shadow .15s, background .15s;
+}
+.cal-day:active { transform: scale(.9); }
+.cal-day:disabled { opacity: .32; background: transparent; }
+.cal-day .cd-n { position: relative; z-index: 1; }
+
+/* Area colouring: Sea → light blue · Port → green · Anchor → orange.
+   Filled circle with legible text on top; the specific hues per theme below. */
+.cal-day.a-sea   { background: var(--cal-sea);    color: var(--cal-sea-fg); }
+.cal-day.a-port  { background: var(--cal-port);   color: var(--cal-port-fg); }
+.cal-day.a-anchor{ background: var(--cal-anchor); color: var(--cal-anchor-fg); }
+
+/* Selected day: a clear ring around whatever colour the circle is. */
+.cal-day.sel {
+  box-shadow: 0 0 0 2.5px var(--bg2), 0 0 0 4.5px var(--accent);
+}
+
+/* Done badge: a small green tick in the top-right corner of the circle. */
+.cal-day .cd-tick {
+  position: absolute; top: -3px; right: -3px; z-index: 2;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--good); color: #fff; border: 2px solid var(--bg2);
+  display: none; align-items: center; justify-content: center;
+  font-size: 9px; font-weight: 900; line-height: 1;
+}
+.cal-day.done .cd-tick { display: flex; }
+
+/* ---- legend under the calendar ---- */
+.cal-legend {
+  display: flex; flex-wrap: wrap; gap: 6px 14px; justify-content: center;
+  margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line);
+}
+.cal-legend .leg {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 600; color: var(--muted);
+}
+.cal-legend .leg-dot {
+  width: 14px; height: 14px; border-radius: 50%; flex: 0 0 auto;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.cal-legend .leg-dot.a-sea   { background: var(--cal-sea); }
+.cal-legend .leg-dot.a-port  { background: var(--cal-port); }
+.cal-legend .leg-dot.a-anchor{ background: var(--cal-anchor); }
+.cal-legend .leg-dot.leg-done {
+  background: var(--good); color: #fff; font-size: 9px; font-weight: 900;
+}
 
 .swipehint {
   text-align: center; font-size: 12px; color: var(--muted); font-weight: 600;
