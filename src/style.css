@@ -588,3 +588,46 @@ label.field.invalid .lab { color: var(--bad); }
 .tilegrid.editing .tile { border-color: var(--accent); border-style: dashed; }
 .tile input { width: 100%; text-align: center; font-size: 22px; font-weight: 800; padding: 7px 4px; border-radius: 10px; }
 .editnote { font-size: 12px; color: var(--accent); font-weight: 600; margin: -8px 0 12px; }
+
+/* ---- fire detector schedule ---- */
+.fire-hero {
+  background: linear-gradient(180deg, var(--card2), var(--card));
+  border: 1px solid var(--line); border-radius: 18px; padding: 16px 16px 14px; margin-bottom: 12px;
+}
+.fire-hero.today { border-color: var(--safety); background: linear-gradient(180deg, var(--safety-d), var(--card)); }
+.fire-hero .fh-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.fire-hero .fh-kicker { font-size: 11px; font-weight: 800; letter-spacing: .7px; color: var(--muted); text-transform: uppercase; }
+.fire-hero.today .fh-kicker { color: var(--safety); }
+.fire-hero .fh-date { font-size: 24px; font-weight: 800; margin-top: 6px; letter-spacing: .3px; }
+.fire-hero .fh-sub { font-size: 14px; font-weight: 700; margin-top: 4px; }
+.fire-hero .fh-zones { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+.fire-controls { display: flex; gap: 10px; margin-bottom: 4px; }
+.fc-field { flex: 1; display: block; margin: 0; }
+.fc-field .fc-lab { display: block; font-size: 12px; color: var(--muted); font-weight: 600; margin-bottom: 5px; }
+.fc-field select, .fc-field input { padding: 11px 12px; font-size: 15px; }
+.sat-select { width: 100%; }
+
+/* ---- Saturday fire reminder modal ---- */
+.reminder-back {
+  position: fixed; inset: 0; z-index: 90; pointer-events: none;
+  display: flex; align-items: center; justify-content: center; padding: 22px;
+  background: rgba(4, 14, 22, 0);
+  -webkit-backdrop-filter: blur(0); backdrop-filter: blur(0);
+  transition: background .28s, backdrop-filter .28s;
+}
+.reminder-back.show { background: rgba(4, 14, 22, .55); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); pointer-events: auto; }
+.reminder-card {
+  width: 100%; max-width: 360px; background: var(--card); border: 1px solid var(--line);
+  border-radius: 20px; padding: 22px 20px; text-align: center;
+  opacity: 0; transform: translateY(18px) scale(.96);
+  transition: transform .34s cubic-bezier(.2,1.2,.4,1), opacity .26s;
+  box-shadow: 0 20px 60px rgba(0,0,0,.45);
+}
+.reminder-back.show .reminder-card { opacity: 1; transform: translateY(0) scale(1); }
+.reminder-card .rm-ic { font-size: 40px; }
+.reminder-card .rm-title { font-size: 19px; font-weight: 800; margin-top: 8px; }
+.reminder-card .rm-sub { font-size: 14px; font-weight: 700; color: var(--safety); margin-top: 6px; }
+.reminder-card .rm-zones { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.reminder-card .rm-actions { display: flex; gap: 10px; margin-top: 18px; }
+.reminder-card .rm-actions .btn { flex: 1; }

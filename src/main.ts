@@ -8,7 +8,7 @@ import { renderExport } from "./screens/exportScreen";
 import { renderSettings } from "./screens/settings";
 import { renderIccp } from "./screens/iccp";
 import { renderBattery } from "./screens/battery";
-import { renderFire } from "./screens/fire";
+import { renderFire, maybeShowFireReminder } from "./screens/fire";
 import { renderMotorTemp } from "./screens/motortemp";
 import { renderVibration } from "./screens/vibration";
 import { renderBusbar } from "./screens/busbar";
@@ -70,6 +70,9 @@ async function boot() {
   const mount = h("div", { id: "view" });
   app.append(mount, bottomNav());
   initRouter(mount);
+
+  // Saturday: remind which fire detectors are scheduled for today (once/day).
+  maybeShowFireReminder();
 }
 
 boot();

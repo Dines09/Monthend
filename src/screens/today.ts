@@ -4,6 +4,7 @@ import { isSaturday, isoDate, ym, saturdaysInMonth, ymParts, parseIso, MONTHS_SH
 import {
   motorTempStatus, vibrationStatus, busbarStatus, freonStatus, cmStatus, type RecStatus,
 } from "../status";
+import { currentFireSession } from "../fireSchedule";
 
 type Mode = "daily" | "sat" | "monthly";
 
@@ -46,7 +47,26 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
   const missed = pastSats.filter((s) => !battDates.has(s));
   const nextSat = sats.find((s) => s > todayIso);
   const batTodayCount = sat ? await db.battery.where("date").equals(todayIso).count() : 0;
-  const fireTodayCount = sat ? await db.fireTest.where("testedDate").equals(todayIso).count() : 0;
+
+  // Fire-detector roster: which detectors are scheduled for the upcoming (or
+  // today's) Saturday, and how many are already tested this quarter.
+  const fireSession = currentFireSession(todayIso);
+  const fireUpcoming = fireSession.sessionSat;
+  const fireUpcomingDets = fireSession.plan.bySat.get(fireUpcoming) ?? [];
+  let fireDoneUpcoming = 0;
+  {
+    const keys = new Set(fireUpcomingDets.map((d) => d.detKey));
+    const { startYm, endYm } = fireSession.plan;
+    const done = new Set<string>();
+    for (const t of await db.fireTest.toArray()) {
+      if (!keys.has(t.detKey)) continue;
+      const m = t.testedDate.slice(0, 7);
+      if (m >= startYm && m <= endYm) done.add(t.detKey);
+    }
+    fireDoneUpcoming = done.size;
+  }
+  const fireScheduledToday = sat && fireUpcoming === todayIso ? fireUpcomingDets.length : 0;
+  const fireDoneToday = sat && fireUpcoming === todayIso ? fireDoneUpcoming : 0;
 
   const monthlyDefs: [string, string, string, () => Promise<RecStatus>][] = [
     ["🌡️", "Motor Temp", "/rec/motortemp", () => motorTempStatus(curYm)],
@@ -69,7 +89,8 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
       };
     if (mode === "sat") {
       if (sat) {
-        const done = batTodayCount >= 5 && fireTodayCount > 0;
+        const fireDone = fireScheduledToday === 0 || fireDoneToday >= fireScheduledToday;
+        const done = batTodayCount >= 5 && fireDone;
         return { ic: "🛟", title: "Saturday", sub: "Safety routine · today",
           badge: done ? badge("done", "✓") : badge("due", "Due") };
       }
@@ -138,8 +159,10 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
             batTodayCount > 0 ? `${batTodayCount}/5 banks entered` : "Weekly battery test — tap to record", "/rec/battery",
             batTodayCount >= 5 ? h("span", { class: "chip done" }, "✓") : h("span", { class: "chip due" }, "Due")),
           cardLink("🚨", "Fire Detector Test",
-            fireTodayCount > 0 ? `${fireTodayCount} detectors tested today` : "Weekly detector test — tap to record", "/rec/fire",
-            fireTodayCount > 0 ? h("span", { class: "chip done" }, `${fireTodayCount}`) : h("span", { class: "chip due" }, "Due"))
+            `${fireDoneToday}/${fireScheduledToday} scheduled detectors today`, "/rec/fire",
+            fireDoneToday >= fireScheduledToday
+              ? h("span", { class: "chip done" }, "✓")
+              : h("span", { class: "chip due" }, `${fireDoneToday}/${fireScheduledToday}`))
         );
       } else {
         if (missed.length) {
@@ -155,7 +178,8 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
                       : "No more Saturdays this month."))
         );
         listEl.append(cardLink("🔋", "Battery Log", "Open weekly battery record", "/rec/battery"));
-        listEl.append(cardLink("🚨", "Fire Detector Test", "Open quarterly detector record", "/rec/fire"));
+        listEl.append(cardLink("🚨", "Fire Detector Test",
+          `Next: ${fireUpcomingDets.length} detectors on ${dayLabel(fireUpcoming)}`, "/rec/fire"));
       }
     } else {
       monthlyDefs.forEach(([ic, title, route], i) => {
