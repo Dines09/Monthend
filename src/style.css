@@ -346,6 +346,61 @@ select.dayselect {
   padding-left: 34px; /* balance the arrow so the label stays centered */
 }
 
+/* ---- ICCP combined sticky header (month · Day N · ring) ---- */
+.dayhead {
+  position: sticky; top: calc(var(--top-h) + env(safe-area-inset-top)); z-index: 10;
+  background: var(--bg); padding: 8px 0 10px; margin: -4px 0 8px;
+  display: grid; grid-template-columns: 1fr auto auto; align-items: center;
+  gap: 10px 12px; transition: gap .3s;
+}
+.dayhead .dh-month { min-width: 0; transition: opacity .3s, max-height .3s, transform .3s; }
+.dayhead .dh-month select { width: 100%; }
+.dayhead .dh-day { grid-column: 2; }
+.dayhead .dh-ring { grid-column: 3; }
+.daybig {
+  position: relative;
+  background: var(--card2); border: 1px solid var(--line); color: var(--text);
+  border-radius: 14px; padding: 9px 16px; width: auto;
+  display: flex; align-items: center; gap: 6px;
+  transition: transform .3s, padding .3s, background .2s;
+}
+.daybig:active { transform: scale(.96); }
+.daybig .dnum { font-weight: 800; font-size: 17px; letter-spacing: .2px; line-height: 1.1; }
+/* Native day <select> overlaid transparently so tapping the chip opens it. */
+.daybig select.dayselect {
+  position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0;
+  opacity: 0; border: 0; cursor: pointer; appearance: none; background: none;
+}
+
+/* Scrolled state: the month row collapses away and the Day chip grows and slides
+   to the left to become the primary anchor for swiping between days. */
+.dayhead.scrolled { grid-template-columns: 1fr auto; }
+.dayhead.scrolled .dh-month {
+  opacity: 0; max-height: 0; transform: translateY(-6px); pointer-events: none;
+  overflow: hidden; position: absolute;
+}
+.dayhead.scrolled .dh-day { grid-column: 1; justify-self: start; }
+.dayhead.scrolled .dh-ring { grid-column: 2; }
+.dayhead.scrolled .daybig {
+  background: var(--accent); border-color: var(--accent); color: var(--btn-fg);
+  padding: 11px 20px;
+}
+.dayhead.scrolled .daybig .dnum { font-size: 20px; }
+
+.swipehint {
+  text-align: center; font-size: 12px; color: var(--muted); font-weight: 600;
+  margin: 0 0 12px; opacity: .8; user-select: none;
+}
+
+/* ---- invalid / out-of-range reading field ---- */
+input.invalid {
+  border-color: var(--bad) !important;
+  background: rgba(240,85,106,.08);
+  color: var(--bad);
+}
+input.invalid:focus { box-shadow: 0 0 0 3px rgba(240,85,106,.2) !important; }
+label.field.invalid .lab { color: var(--bad); }
+
 /* ---- Today: adaptive mode tiles (Daily / Saturday / Monthly) ---- */
 .modebar { display: flex; flex-direction: column; gap: 10px; margin: 6px 0 4px; }
 .mode-row { display: flex; gap: 10px; }

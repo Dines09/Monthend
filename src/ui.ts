@@ -279,6 +279,34 @@ export function helpTip(text: string): HTMLElement {
   return btn;
 }
 
+// ---- reading field validation spec ----
+// Describes how one numeric reading should be entered and checked: a valid
+// range, how many decimals, and (optionally) when the input is "settled" enough
+// to auto-advance to the next field. `warn` gives an out-of-range message.
+export interface ReadingSpec {
+  min: number;
+  max: number;
+  decimals?: number; // digits allowed after the point (0 = integer)
+  intDigits?: number; // whole-number digits that mark a "full" entry for auto-advance
+  warn?: string; // shown (red) when the value is out of range
+}
+
+// Is `raw` a completed entry per the spec? Used to decide auto-advance: e.g. a
+// draft of "11.3" (2 int digits, 1 decimal) is done, "11" alone is not yet.
+function isSettled(raw: string, spec: ReadingSpec): boolean {
+  const dec = spec.decimals ?? 0;
+  const m = raw.match(/^(\d+)(?:\.(\d+))?$/);
+  if (!m) return false;
+  const [, intPart, decPart = ""] = m;
+  if (dec > 0) return decPart.length >= dec; // needs the decimal digit(s)
+  // integer field: settled once it has the expected number of whole digits
+  return spec.intDigits ? intPart.length >= spec.intDigits : true;
+}
+
+export function inRange(v: number | null, spec: ReadingSpec): boolean {
+  return v == null || (v >= spec.min && v <= spec.max);
+}
+
 // numeric input helper
 export function numInput(opts: {
   value?: number | null;
@@ -287,7 +315,11 @@ export function numInput(opts: {
   step?: string;
   decimal?: boolean;
   readonly?: boolean;
+  spec?: ReadingSpec;
+  // Called when a valid, "settled" value is typed — used to auto-advance focus.
+  onSettled?: (v: number) => void;
 }): HTMLInputElement {
+  const spec = opts.spec;
   const inp = h("input", {
     type: "text",
     inputmode: opts.decimal === false ? "numeric" : "decimal",
@@ -296,11 +328,43 @@ export function numInput(opts: {
     readonly: opts.readonly || undefined,
     class: opts.readonly ? "locked" : undefined,
     onInput: (e: Event) => {
-      const raw = (e.target as HTMLInputElement).value.trim();
-      if (raw === "") return opts.onInput(null);
+      const el = e.target as HTMLInputElement;
+      let raw = el.value.trim();
+      // Clamp to the allowed number of decimal places while typing so a decimal
+      // field like draft only ever holds one digit after the point.
+      if (spec && (spec.decimals ?? 0) >= 0) {
+        const capped = capDecimals(raw, spec.decimals ?? 0);
+        if (capped !== raw) { raw = capped; el.value = capped; }
+      }
+      if (raw === "") { setInvalid(inp, false); return opts.onInput(null); }
       const n = Number(raw);
-      opts.onInput(Number.isNaN(n) ? null : n);
+      const val = Number.isNaN(n) ? null : n;
+      if (spec) {
+        const bad = val != null && !inRange(val, spec);
+        setInvalid(inp, bad, spec.warn);
+        opts.onInput(val);
+        // Auto-advance only when the value is valid AND fully entered.
+        if (!bad && val != null && opts.onSettled && isSettled(raw, spec)) opts.onSettled(val);
+        return;
+      }
+      opts.onInput(val);
     },
   });
   return inp;
+}
+
+// Trim `raw` so it has at most `decimals` digits after the point.
+function capDecimals(raw: string, decimals: number): string {
+  const i = raw.indexOf(".");
+  if (i < 0) return raw;
+  if (decimals === 0) return raw.slice(0, i); // no decimals allowed
+  return raw.slice(0, i + 1 + decimals);
+}
+
+// Toggle the red "invalid reading" state on a field and show a warning toast.
+function setInvalid(inp: HTMLInputElement, bad: boolean, warn?: string) {
+  inp.classList.toggle("invalid", bad);
+  const wrap = inp.closest(".field") as HTMLElement | null;
+  wrap?.classList.toggle("invalid", bad);
+  if (bad && warn) toast(warn, 3600);
 }

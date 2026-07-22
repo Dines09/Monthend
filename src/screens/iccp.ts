@@ -1,7 +1,7 @@
-import { h, topbar, screen, numInput, toast, segmented, progressRing, achievement, helpTip, longPress } from "../ui";
+import { h, topbar, screen, numInput, toast, segmented, progressRing, achievement, helpTip, longPress, type ReadingSpec } from "../ui";
 import { db, type IccpDaily } from "../db";
 import { isoDate, defaultReportYm, ymParts, debounce, parseIso, saturdaysInMonth, slipringDefault } from "../util";
-import { monthPicker, toolbar } from "./parts";
+import { monthPicker } from "./parts";
 
 const AREAS = ["Sea", "Port", "Anchor"];
 const SEA_CHESTS = ["P", "S", "P/S"];
@@ -20,6 +20,21 @@ const STATIONARY = new Set(["Port", "Anchor"]);
 
 // Today's readings the user actually enters (excludes auto-filled fields).
 const READING_KEYS: (keyof IccpDaily)[] = ["draft", "seaTemp", "amp", "volt", "cell1", "cell2"];
+
+// Per-field validation + entry rules. Out-of-range values turn the field red and
+// a settled valid value auto-advances focus to the next field in ADVANCE_ORDER.
+const SPECS: Partial<Record<keyof IccpDaily, ReadingSpec>> = {
+  draft:   { min: 5.5,  max: 15.5, decimals: 1, intDigits: 2, warn: "Draft looks off — should be 5.5–15.5 M. Check the reading." },
+  seaTemp: { min: 0,    max: 40,   decimals: 0, intDigits: 2, warn: "Sea temp out of range — should be 0–40 °C. Check the reading." },
+  cell1:   { min: 150,  max: 250,  decimals: 0, intDigits: 3, warn: "Sensing Cell 1 out of range — should be 150–250 mV. Check the reading." },
+  cell2:   { min: 150,  max: 250,  decimals: 0, intDigits: 3, warn: "Sensing Cell 2 out of range — should be 150–250 mV. Check the reading." },
+  amp:     { min: 0,    max: 100,  decimals: 1, intDigits: 2, warn: "Output Amp out of range — should be up to 100 A. Check the reading." },
+  volt:    { min: 2,    max: 20,   decimals: 1, intDigits: 2, warn: "Output Volt out of range — should be 2–20 V. Check the reading." },
+  shaftMv: { min: 0,    max: 50,   decimals: 0, warn: "Shaft potential > 50 mV — check your reading again and check the shaft earthing / bonding system." },
+};
+
+// Focus jumps to the next field once the current one is validly settled.
+const ADVANCE_ORDER: (keyof IccpDaily)[] = ["draft", "seaTemp", "cell1", "cell2", "amp", "volt", "shaftMv"];
 
 export async function renderIccp(_p: Record<string, string>, mount: HTMLElement) {
   const today = new Date();
@@ -46,12 +61,19 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
     if (!selDate.startsWith(curYm)) { selDate = `${curYm}-01`; daySelect.value = selDate; }
   }
 
-  // Count of today's reading fields already filled (for the progress ring).
+  // Count of today's reading fields already filled (for the progress ring). A
+  // field only counts when its value is present AND within the valid range, so a
+  // half-typed / out-of-range last reading won't trip the "completed" tick early.
   function progressOf(saved: IccpDaily | undefined): { done: number; total: number } {
     const area = saved?.area ?? "Sea";
     const stationary = STATIONARY.has(area);
     const keys = stationary ? READING_KEYS : [...READING_KEYS, "shaftMv" as keyof IccpDaily];
-    const done = keys.filter((k) => saved?.[k] != null).length;
+    const done = keys.filter((k) => {
+      const v = saved?.[k];
+      if (v == null) return false;
+      const spec = SPECS[k];
+      return !spec || (typeof v === "number" && v >= spec.min && v <= spec.max);
+    }).length;
     return { done, total: keys.length };
   }
 
@@ -62,10 +84,11 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
     const complete = total > 0 && done >= total;
     if (fireOnComplete && complete && !lastComplete) {
       const when = selDate === todayIso ? "today" : `Day ${Number(selDate.slice(-2))}`;
-      // Dismiss the on-screen keyboard first, then celebrate ~1.3s later so the
-      // tick lands centered instead of being shoved up by the keyboard.
+      // Dismiss the on-screen keyboard first, then wait ~1.2s after the last
+      // reading settles before celebrating — so the tick lands centered and
+      // never pops up mid-typing of the final value.
       (document.activeElement as HTMLElement | null)?.blur?.();
-      setTimeout(() => achievement("Entry completed!", `ICCP / MGPS saved for ${when}`), 1300);
+      setTimeout(() => achievement("Entry completed!", `ICCP / MGPS saved for ${when}`), 1200);
     }
     lastComplete = complete;
   }
@@ -115,12 +138,32 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
 
     // Big, glove-friendly labelled field.
     const field = (lab: string, node: Node) => h("label", { class: "field big" }, h("span", { class: "lab" }, lab), node);
-    const nf = (key: keyof IccpDaily) =>
-      numInput({
+
+    // Registry of reading inputs so a settled value can auto-advance focus to the
+    // next field the user still has to fill.
+    const inputs = new Map<keyof IccpDaily, HTMLInputElement>();
+    const focusNext = (from: keyof IccpDaily) => {
+      const start = ADVANCE_ORDER.indexOf(from);
+      if (start < 0) return;
+      for (let i = start + 1; i < ADVANCE_ORDER.length; i++) {
+        const el = inputs.get(ADVANCE_ORDER[i]);
+        if (el && !el.readOnly && el.value.trim() === "") { el.focus(); return; }
+      }
+      // Nothing left to fill — drop the keyboard so the completion tick can land.
+      (document.activeElement as HTMLElement | null)?.blur?.();
+    };
+
+    const nf = (key: keyof IccpDaily) => {
+      const inp = numInput({
         value: (rec[key] as number) ?? null,
         placeholder: prev?.[key] != null ? String(prev[key]) : "",
+        spec: SPECS[key],
         onInput: debounce(async (v) => { await save({ [key]: v }); await refreshRing(true); }, 300),
+        onSettled: () => focusNext(key),
       });
+      inputs.set(key, inp);
+      return inp;
+    };
 
     const areaSeg = segmented({ options: AREAS, value: area, big: true,
       onPick: async (v) => { await save({ area: v }); await loadDay(); } });
@@ -226,22 +269,89 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
     return Object.entries(patch).some(([k, v]) => (saved as any)[k] !== v);
   }
 
-  daySelect.addEventListener("change", () => { selDate = daySelect.value; loadDay(); });
+  daySelect.addEventListener("change", () => { selDate = daySelect.value; loadDay(); syncDayLabel(); });
+
+  // Big "Day N" indicator (also the swipe/scroll focal point). The native day
+  // <select> is overlaid transparently on top so tapping the chip opens the
+  // picker reliably on every browser.
+  const dayLabel = h("div", { class: "dnum" });
+  const dayBig = h("div", { class: "daybig" }, dayLabel, daySelect);
+  function syncDayLabel() { dayLabel.textContent = `Day ${Number(selDate.slice(-2))}`; }
+
+  const monthRow = monthPicker(curYm, (v) => { curYm = v; rebuildDays(); loadDay(); syncDayLabel(); }, today.getFullYear());
+
+  // Move by ±1 day, crossing month boundaries within the visible year.
+  function goDay(delta: number) {
+    const next = new Date(parseIso(selDate).getTime() + delta * 86400000);
+    const nextIso = isoDate(next);
+    const nextYm = nextIso.slice(0, 7);
+    // Don't navigate into the future or before the seeded history year.
+    if (nextIso > todayIso) { toast("That's in the future", 1200); return; }
+    selDate = nextIso;
+    if (nextYm !== curYm) { curYm = nextYm; monthRow.value = curYm; rebuildDays(); }
+    else daySelect.value = selDate;
+    syncDayLabel();
+    loadDay();
+    if (navigator.vibrate) { try { navigator.vibrate(8); } catch { /* ignore */ } }
+  }
+
+  // Combined sticky header: month picker + big Day N + progress ring. A scrolled
+  // class (toggled below) promotes the Day label and shrinks the month row so the
+  // day becomes the focal point when the user scrolls into the readings.
+  const dayhead = h("div", { class: "dayhead" },
+    h("div", { class: "dh-month" }, monthRow),
+    h("div", { class: "dh-day" }, dayBig),
+    h("div", { class: "dh-ring" }, ringWrap),
+  );
 
   mount.append(
     topbar("ICCP / MGPS Daily", "Daily readings", "/records"),
     screen(
-      toolbar(
-        monthPicker(curYm, (v) => { curYm = v; rebuildDays(); loadDay(); }, today.getFullYear()),
-        ringWrap
-      ),
-      daySelect,
-      h("div", { style: { height: "12px" } }),
+      dayhead,
+      h("div", { class: "swipehint" }, "‹ swipe an empty area to change day ›"),
       form,
       monthlyBtn
     )
   );
+
+  // ---- swipe left/right on empty space to change day ----
+  // Ignores swipes that start on an input/select/button so it never fights with
+  // typing, the segmented controls, or vertical scrolling.
+  let sx = 0, sy = 0, tracking = false;
+  const view = mount.querySelector<HTMLElement>(".screen")!;
+  view.addEventListener("pointerdown", (e) => {
+    const t = e.target as HTMLElement;
+    if (t.closest("input, select, textarea, button, .seg, .tilegrid")) { tracking = false; return; }
+    sx = e.clientX; sy = e.clientY; tracking = true;
+  });
+  view.addEventListener("pointerup", (e) => {
+    if (!tracking) return;
+    tracking = false;
+    const dx = e.clientX - sx, dy = e.clientY - sy;
+    // Mostly-horizontal swipe past a threshold.
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.6) {
+      goDay(dx < 0 ? 1 : -1); // swipe left -> next day, right -> previous day
+    }
+  });
+
+  // ---- scroll-linked header: promote Day N as the user scrolls down ----
+  let scrolled = false;
+  const onScroll = () => {
+    const s = window.scrollY > 40;
+    if (s !== scrolled) { scrolled = s; dayhead.classList.toggle("scrolled", s); }
+  };
+  window.addEventListener("scroll", onScroll, { passive: true });
+  // Clean up the listener when we leave this screen (next route clears #view).
+  const mo = new MutationObserver(() => {
+    if (!document.body.contains(dayhead)) {
+      window.removeEventListener("scroll", onScroll);
+      mo.disconnect();
+    }
+  });
+  mo.observe(document.getElementById("view")!, { childList: true });
+
   rebuildDays();
+  syncDayLabel();
   await loadDay();
 }
 
