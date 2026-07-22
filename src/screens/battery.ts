@@ -1,10 +1,16 @@
-import { h, topbar, screen, numInput, toast, segmented } from "../ui";
+import { h, topbar, screen, numInput, toast, segmented, type ReadingSpec } from "../ui";
 import { db, type BatteryEntry } from "../db";
 import { masters } from "../seed";
 import { saturdaysInMonth, ymParts, debounce, ddMmmYyyy } from "../util";
 import { monthPicker, toolbar } from "./parts";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+
+// Per-bank reading rules. 2V cells (GS/GMDSS) sit around 2.11 V; the 12 V banks
+// (lifeboat / emergency gen) read like 13.31 V; CCA is a 3-digit count 500–900.
+const CELL_2V: ReadingSpec = { min: 2.0, max: 2.5, decimals: 2, intDigits: 1, warn: "Cell voltage should be ~2.0–2.5 V. Check the reading." };
+const CELL_12V: ReadingSpec = { min: 10, max: 15, decimals: 2, intDigits: 2, warn: "Battery voltage should be ~10–15 V. Check the reading." };
+const CCA_SPEC: ReadingSpec = { min: 500, max: 900, decimals: 0, intDigits: 3, warn: "CCA should be 500–900. Check the reading." };
 
 export async function renderBattery(_p: Record<string, string>, mount: HTMLElement) {
   const today = new Date();
@@ -60,24 +66,43 @@ export async function renderBattery(_p: Record<string, string>, mount: HTMLEleme
       return sum;
     }
 
+    // Voltage rule for this bank: 2 V cells vs. 12 V (lifeboat / emergency) banks.
+    const voltSpec = isCCA ? CELL_12V : CELL_2V;
+
+    // Ordered list of inputs so a settled value auto-advances to the next field.
+    const order: HTMLInputElement[] = [];
+    const focusNext = (from: HTMLInputElement) => {
+      const idx = order.indexOf(from);
+      for (let j = idx + 1; j < order.length; j++) {
+        if (order[j].value.trim() === "") { order[j].focus(); return; }
+      }
+      (document.activeElement as HTMLElement | null)?.blur?.();
+    };
+
     // Battery graphic: one tappable cell per 2V cell (or per battery for CCA).
     const cols = readings.length <= 2 ? 2 : readings.length <= 6 ? 3 : 4;
     const cellsWrap = h("div", { class: "batt-cells", style: { gridTemplateColumns: `repeat(${cols}, 1fr)` } });
     readings.forEach((r, i) => {
       const cell = h("div", { class: `cell ${r.volt != null ? "filled" : ""}` });
+      const warn = h("div", { class: "field-warn" }, "");
       const voltInp = numInput({
-        value: r.volt ?? null, placeholder: "—",
+        value: r.volt ?? null, placeholder: "—", spec: voltSpec,
         onInput: debounce(async (v) => { readings[i].volt = v; cell.classList.toggle("filled", v != null); recalcTotal(); await persist(); }, 300),
+        onSettled: () => focusNext(voltInp),
       });
+      order.push(voltInp);
       cell.append(h("div", { class: "cnum" }, isCCA ? r.label : `Cell ${r.label}`), voltInp);
       if (isCCA) {
         const ccaInp = numInput({
-          value: typeof r.aux === "number" ? r.aux : null, placeholder: "CCA",
+          value: typeof r.aux === "number" ? r.aux : null, placeholder: "CCA", spec: CCA_SPEC,
           onInput: debounce(async (v) => { readings[i].aux = v; await persist(); }, 300),
+          onSettled: () => focusNext(ccaInp),
         });
         ccaInp.classList.add("cca");
+        order.push(ccaInp);
         cell.append(ccaInp);
       }
+      cell.append(warn);
       cellsWrap.append(cell);
     });
 

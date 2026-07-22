@@ -1,7 +1,6 @@
-import { h, topbar, screen, numInput, toast, segmented, progressRing, achievement, helpTip, longPress, type ReadingSpec } from "../ui";
+import { h, topbar, screen, numInput, readingField, toast, segmented, progressRing, achievement, helpTip, longPress, wheelPicker, type ReadingSpec } from "../ui";
 import { db, type IccpDaily } from "../db";
-import { isoDate, defaultReportYm, ymParts, debounce, parseIso, saturdaysInMonth, slipringDefault } from "../util";
-import { monthPicker } from "./parts";
+import { isoDate, defaultReportYm, ymParts, debounce, parseIso, saturdaysInMonth, slipringDefault, MONTHS_FULL } from "../util";
 
 const AREAS = ["Sea", "Port", "Anchor"];
 const SEA_CHESTS = ["P", "S", "P/S"];
@@ -34,7 +33,9 @@ const SPECS: Partial<Record<keyof IccpDaily, ReadingSpec>> = {
 };
 
 // Focus jumps to the next field once the current one is validly settled.
-const ADVANCE_ORDER: (keyof IccpDaily)[] = ["draft", "seaTemp", "cell1", "cell2", "amp", "volt", "shaftMv"];
+// Order matches the on-screen fields: draft, sea temp, then the ICCP system
+// block (Output Amp -> Output Volt -> Sensing Cell 1 -> Sensing Cell 2), shaft.
+const ADVANCE_ORDER: (keyof IccpDaily)[] = ["draft", "seaTemp", "amp", "volt", "cell1", "cell2", "shaftMv"];
 
 export async function renderIccp(_p: Record<string, string>, mount: HTMLElement) {
   const today = new Date();
@@ -45,20 +46,13 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
   let editingMgps = false;
   let lastComplete = false;
 
-  const daySelect = h("select", { class: "dayselect" });
   const form = h("div", {});
   const ringWrap = h("div", {});
   const monthlyBtn = h("button", { class: "btn ghost", style: { marginTop: "16px" }, onClick: () => openMonthly(curYm) }, "Monthly footer (observations, slipring, remark)");
 
+  // Keep the selected day inside the current month (clamp when the month changes).
   function rebuildDays() {
-    daySelect.replaceChildren();
-    const { year, month } = ymParts(curYm);
-    const dim = new Date(year, month, 0).getDate();
-    for (let d = 1; d <= dim; d++) {
-      const iso = `${curYm}-${String(d).padStart(2, "0")}`;
-      daySelect.append(h("option", { value: iso, selected: iso === selDate }, `Day ${d}`));
-    }
-    if (!selDate.startsWith(curYm)) { selDate = `${curYm}-01`; daySelect.value = selDate; }
+    if (!selDate.startsWith(curYm)) selDate = `${curYm}-01`;
   }
 
   // Count of today's reading fields already filled (for the progress ring). A
@@ -153,16 +147,19 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
       (document.activeElement as HTMLElement | null)?.blur?.();
     };
 
-    const nf = (key: keyof IccpDaily) => {
-      const inp = numInput({
+    // A full reading field (label + validated input + inline warning line). The
+    // input is registered for auto-advance.
+    const rf = (key: keyof IccpDaily, label: string) => {
+      const { wrap, input } = readingField(label, {
         value: (rec[key] as number) ?? null,
         placeholder: prev?.[key] != null ? String(prev[key]) : "",
         spec: SPECS[key],
+        big: true,
         onInput: debounce(async (v) => { await save({ [key]: v }); await refreshRing(true); }, 300),
         onSettled: () => focusNext(key),
       });
-      inputs.set(key, inp);
-      return inp;
+      inputs.set(key, input);
+      return wrap;
     };
 
     const areaSeg = segmented({ options: AREAS, value: area, big: true,
@@ -228,18 +225,18 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
     const readings = h("div", { class: "card group" },
       h("div", { class: "group-hdr" }, h("span", {}, "Today's readings"), h("span", { class: "group-note" }, "enter values")),
       h("div", { class: "grid2" },
-        field("Draft (M)", nf("draft")),
-        field("Sea temp (°C)", nf("seaTemp"))),
+        rf("draft", "Draft (M)"),
+        rf("seaTemp", "Sea temp (°C)")),
       h("div", { class: "tlabhdr" }, "ICCP System"),
       h("div", { class: "grid2" },
-        field("Output Amp", nf("amp")),
-        field("Output Volt", nf("volt"))),
+        rf("amp", "Output Amp"),
+        rf("volt", "Output Volt")),
       h("div", { class: "grid2" },
-        field("Sensing Cell 1 (mV)", nf("cell1")),
-        field("Sensing Cell 2 (mV)", nf("cell2"))),
+        rf("cell1", "Sensing Cell 1 (mV)"),
+        rf("cell2", "Sensing Cell 2 (mV)")),
       stationary ? null : h("div", {},
         h("div", { class: "tlabhdr" }, "Shaft Earthing"),
-        field("Shaft potential (mV)", nf("shaftMv"))),
+        rf("shaftMv", "Shaft potential (mV)")),
     );
 
     form.append(prefilled, readings);
@@ -269,16 +266,45 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
     return Object.entries(patch).some(([k, v]) => (saved as any)[k] !== v);
   }
 
-  daySelect.addEventListener("change", () => { selDate = daySelect.value; loadDay(); syncDayLabel(); });
-
-  // Big "Day N" indicator (also the swipe/scroll focal point). The native day
-  // <select> is overlaid transparently on top so tapping the chip opens the
-  // picker reliably on every browser.
+  // ---- header chips: tapping either opens an iOS-style wheel picker ----
   const dayLabel = h("div", { class: "dnum" });
-  const dayBig = h("div", { class: "daybig" }, dayLabel, daySelect);
+  const dayBig = h("button", { class: "daybig", type: "button", onClick: openDayWheel }, dayLabel);
   function syncDayLabel() { dayLabel.textContent = `Day ${Number(selDate.slice(-2))}`; }
 
-  const monthRow = monthPicker(curYm, (v) => { curYm = v; rebuildDays(); loadDay(); syncDayLabel(); }, today.getFullYear());
+  const monthLabel = h("div", { class: "mnum" });
+  const monthChip = h("button", { class: "monthchip", type: "button", onClick: openMonthWheel }, monthLabel);
+  function syncMonthLabel() {
+    const { month } = ymParts(curYm);
+    monthLabel.textContent = `${MONTHS_FULL[month - 1]} ${curYm.slice(0, 4)}`;
+  }
+
+  // Day wheel: "Day" fixed label + the days of the current month scrolling.
+  function openDayWheel() {
+    const { year, month } = ymParts(curYm);
+    const dim = new Date(year, month, 0).getDate();
+    const maxDay = curYm === todayIso.slice(0, 7) ? Number(todayIso.slice(-2)) : dim;
+    const options = Array.from({ length: dim }, (_, i) => {
+      const d = i + 1;
+      return { value: `${curYm}-${String(d).padStart(2, "0")}`, text: String(d), disabled: d > maxDay };
+    }).filter((o) => !o.disabled);
+    wheelPicker({
+      columns: [{ label: "Day", options, value: selDate }],
+      onDone: ([iso]) => { selDate = iso; syncDayLabel(); loadDay(); },
+    });
+  }
+
+  // Month wheel: months scroll, the year stays fixed beside them.
+  function openMonthWheel() {
+    const year = today.getFullYear();
+    const maxM = today.getMonth() + 1; // don't allow future months
+    const options = MONTHS_FULL.slice(0, maxM).map((name, i) => ({
+      value: `${year}-${String(i + 1).padStart(2, "0")}`, text: name,
+    }));
+    wheelPicker({
+      columns: [{ label: String(year), options, value: curYm }],
+      onDone: ([ym]) => { curYm = ym; syncMonthLabel(); rebuildDays(); syncDayLabel(); loadDay(); },
+    });
+  }
 
   // Move by ±1 day, crossing month boundaries within the visible year.
   function goDay(delta: number) {
@@ -288,18 +314,17 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
     // Don't navigate into the future or before the seeded history year.
     if (nextIso > todayIso) { toast("That's in the future", 1200); return; }
     selDate = nextIso;
-    if (nextYm !== curYm) { curYm = nextYm; monthRow.value = curYm; rebuildDays(); }
-    else daySelect.value = selDate;
+    if (nextYm !== curYm) { curYm = nextYm; rebuildDays(); syncMonthLabel(); }
     syncDayLabel();
     loadDay();
     if (navigator.vibrate) { try { navigator.vibrate(8); } catch { /* ignore */ } }
   }
 
-  // Combined sticky header: month picker + big Day N + progress ring. A scrolled
-  // class (toggled below) promotes the Day label and shrinks the month row so the
-  // day becomes the focal point when the user scrolls into the readings.
+  // Combined sticky header: month chip + big Day N + progress ring. A scrolled
+  // class (toggled below) promotes the Day label and shrinks the month chip so
+  // the day becomes the focal point when the user scrolls into the readings.
   const dayhead = h("div", { class: "dayhead" },
-    h("div", { class: "dh-month" }, monthRow),
+    h("div", { class: "dh-month" }, monthChip),
     h("div", { class: "dh-day" }, dayBig),
     h("div", { class: "dh-ring" }, ringWrap),
   );
@@ -315,24 +340,34 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
   );
 
   // ---- swipe left/right on empty space to change day ----
-  // Ignores swipes that start on an input/select/button so it never fights with
-  // typing, the segmented controls, or vertical scrolling.
-  let sx = 0, sy = 0, tracking = false;
+  // Uses touch/pointer start+end coords. Ignores swipes that begin on an
+  // interactive control (input/select/button/segment/tiles) so it never fights
+  // with typing or the segmented controls, but works anywhere else on the screen.
   const view = mount.querySelector<HTMLElement>(".screen")!;
-  view.addEventListener("pointerdown", (e) => {
-    const t = e.target as HTMLElement;
-    if (t.closest("input, select, textarea, button, .seg, .tilegrid")) { tracking = false; return; }
-    sx = e.clientX; sy = e.clientY; tracking = true;
-  });
-  view.addEventListener("pointerup", (e) => {
+  let sx = 0, sy = 0, tracking = false;
+  const startsOnControl = (t: EventTarget | null) =>
+    (t as HTMLElement | null)?.closest?.("input, select, textarea, button, .seg, .tilegrid");
+  const onStart = (x: number, y: number, t: EventTarget | null) => {
+    if (startsOnControl(t)) { tracking = false; return; }
+    sx = x; sy = y; tracking = true;
+  };
+  const onEnd = (x: number, y: number) => {
     if (!tracking) return;
     tracking = false;
-    const dx = e.clientX - sx, dy = e.clientY - sy;
-    // Mostly-horizontal swipe past a threshold.
-    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.6) {
+    const dx = x - sx, dy = y - sy;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.4) {
       goDay(dx < 0 ? 1 : -1); // swipe left -> next day, right -> previous day
     }
-  });
+  };
+  view.addEventListener("touchstart", (e) => {
+    const t = e.touches[0]; onStart(t.clientX, t.clientY, e.target);
+  }, { passive: true });
+  view.addEventListener("touchend", (e) => {
+    const t = e.changedTouches[0]; onEnd(t.clientX, t.clientY);
+  }, { passive: true });
+  // Pointer fallback for desktop / mouse-drag testing.
+  view.addEventListener("pointerdown", (e) => { if (e.pointerType !== "touch") onStart(e.clientX, e.clientY, e.target); });
+  view.addEventListener("pointerup", (e) => { if (e.pointerType !== "touch") onEnd(e.clientX, e.clientY); });
 
   // ---- scroll-linked header: promote Day N as the user scrolls down ----
   let scrolled = false;
@@ -352,6 +387,7 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
 
   rebuildDays();
   syncDayLabel();
+  syncMonthLabel();
   await loadDay();
 }
 

@@ -258,6 +258,98 @@ export function achievement(msg = "All entries complete!", sub = "") {
   setTimeout(close, 2600);
 }
 
+// ---- iOS-style wheel picker (centered themed modal) ----
+// One or more scrollable columns with a fixed center highlight; the selected
+// item sits big in the middle while neighbours fade/shrink into an arc. Snap
+// scrolling picks the value. `columns` each have their own options + label
+// that stays fixed (e.g. "Day", "2026"). Resolves once the user taps Done.
+export interface WheelColumn {
+  label?: string; // fixed label shown beside the wheel (e.g. year, unit)
+  options: { value: string; text: string }[];
+  value: string;
+}
+
+const WHEEL_ITEM = 40; // px per row — must match .wheel-item height in CSS
+const WHEEL_PAD = 80;  // must match .wheel-pad height (2 rows) in CSS
+
+export function wheelPicker(opts: {
+  title?: string;
+  columns: WheelColumn[];
+  onDone: (values: string[]) => void;
+}): void {
+  const ITEM = WHEEL_ITEM;
+  const cols = opts.columns.map((col) => {
+    const list = h("div", { class: "wheel-list" });
+    let idx = Math.max(0, col.options.findIndex((o) => o.value === col.value));
+    if (idx < 0) idx = 0;
+    const items = col.options.map((o, i) =>
+      h("div", { class: "wheel-item", "data-i": String(i) }, o.text));
+    // Top/bottom spacers so the first/last item can reach the center line.
+    list.append(h("div", { class: "wheel-pad" }), ...items, h("div", { class: "wheel-pad" }));
+
+    const scroller = h("div", { class: "wheel-scroll" }, list);
+
+    const paint = () => {
+      const center = scroller.scrollTop + scroller.clientHeight / 2;
+      items.forEach((el, i) => {
+        const mid = ITEM * (i + 0.5) + WHEEL_PAD;
+        const dist = Math.abs(center - mid) / ITEM; // rows away from center
+        const sel = dist < 0.5;
+        el.classList.toggle("sel", sel);
+        // Arc feel: shrink + fade + tilt back as items move off center.
+        const scale = Math.max(0.62, 1 - dist * 0.16);
+        const op = Math.max(0.22, 1 - dist * 0.34);
+        const rot = Math.max(-58, Math.min(58, (mid - center) / ITEM * 22));
+        el.style.transform = `rotateX(${rot}deg) scale(${scale})`;
+        el.style.opacity = String(op);
+      });
+    };
+    const selectedIndex = () =>
+      Math.max(0, Math.min(col.options.length - 1, Math.round(scroller.scrollTop / ITEM)));
+
+    let raf = 0;
+    scroller.addEventListener("scroll", () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => { raf = 0; paint(); });
+    }, { passive: true });
+
+    const wheel = h("div", { class: "wheel" },
+      scroller,
+      col.label ? h("div", { class: "wheel-fixed" }, col.label) : null);
+
+    return { wheel, scroller, selectedIndex, initIdx: idx, options: col.options, paint };
+  });
+
+  const body = h("div", { class: "wheel-cols" }, ...cols.map((c) => c.wheel));
+  const done = h("button", { class: "btn", type: "button" });
+  done.textContent = "Done";
+  const cancel = h("button", { class: "btn secondary", type: "button" }, "Cancel");
+  const sheet = h("div", { class: "wheel-sheet" },
+    opts.title ? h("div", { class: "wheel-title" }, opts.title) : null,
+    h("div", { class: "wheel-window" }, body, h("div", { class: "wheel-line" })),
+    h("div", { class: "wheel-actions" }, cancel, done));
+  const back = h("div", { class: "wheel-back" }, sheet);
+
+  const close = () => {
+    back.classList.remove("show");
+    setTimeout(() => back.remove(), 220);
+  };
+  cancel.addEventListener("click", close);
+  back.addEventListener("click", (e) => { if (e.target === back) close(); });
+  done.addEventListener("click", () => {
+    const values = cols.map((c) => c.options[c.selectedIndex()].value);
+    close();
+    opts.onDone(values);
+  });
+
+  document.body.append(back);
+  requestAnimationFrame(() => {
+    back.classList.add("show");
+    // Position each wheel at its initial value, then paint the arc.
+    cols.forEach((c) => { c.scroller.scrollTop = c.initIdx * ITEM; c.paint(); });
+  });
+}
+
 // ---- long-press gesture (cancels if the finger moves or scrolls) ----
 export function longPress(el: HTMLElement, cb: () => void, ms = 500) {
   let timer: any, sx = 0, sy = 0;
@@ -353,6 +445,19 @@ export function numInput(opts: {
   return inp;
 }
 
+// A field bundle: a validated input plus an inline warning line beneath it that
+// shows *why* the value is red — right where the user is looking, not as a toast.
+export function readingField(label: string, opts: Parameters<typeof numInput>[0] & { big?: boolean }): {
+  wrap: HTMLElement;
+  input: HTMLInputElement;
+} {
+  const input = numInput(opts);
+  const warnEl = h("div", { class: "field-warn" }, "");
+  const wrap = h("label", { class: `field${opts.big ? " big" : ""}` },
+    h("span", { class: "lab" }, label), input, warnEl);
+  return { wrap, input };
+}
+
 // Trim `raw` so it has at most `decimals` digits after the point.
 function capDecimals(raw: string, decimals: number): string {
   const i = raw.indexOf(".");
@@ -361,10 +466,12 @@ function capDecimals(raw: string, decimals: number): string {
   return raw.slice(0, i + 1 + decimals);
 }
 
-// Toggle the red "invalid reading" state on a field and show a warning toast.
+// Toggle the red "invalid reading" state on a field and show the reason inline
+// (a small line right under the input), not as a floating toast.
 function setInvalid(inp: HTMLInputElement, bad: boolean, warn?: string) {
   inp.classList.toggle("invalid", bad);
-  const wrap = inp.closest(".field") as HTMLElement | null;
+  const wrap = inp.closest(".field, .cell") as HTMLElement | null;
   wrap?.classList.toggle("invalid", bad);
-  if (bad && warn) toast(warn, 3600);
+  const warnEl = wrap?.querySelector<HTMLElement>(".field-warn");
+  if (warnEl) warnEl.textContent = bad ? (warn ?? "Check this reading.") : "";
 }
