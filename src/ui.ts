@@ -381,6 +381,10 @@ export interface ReadingSpec {
   decimals?: number; // digits allowed after the point (0 = integer)
   intDigits?: number; // whole-number digits that mark a "full" entry for auto-advance
   warn?: string; // shown (red) when the value is out of range
+  // When true, an out-of-range value isn't rejected outright: the field warns
+  // but offers a "Use anyway" chip so the user can confirm and keep the reading
+  // (e.g. shaft potential > 50 mV that the user has verified).
+  allowOverride?: boolean;
 }
 
 // Is `raw` a completed entry per the spec? Used to decide auto-advance: e.g. a
@@ -410,8 +414,13 @@ export function numInput(opts: {
   spec?: ReadingSpec;
   // Called when a valid, "settled" value is typed — used to auto-advance focus.
   onSettled?: (v: number) => void;
+  // Called when the user taps "Use anyway" on an out-of-range value (spec.allowOverride).
+  onOverride?: (v: number) => void;
 }): HTMLInputElement {
   const spec = opts.spec;
+  // The value the user has explicitly confirmed via "Use anyway", so we don't
+  // keep flagging it red. Reset whenever the raw text changes to something else.
+  let overridden: number | null = null;
   const inp = h("input", {
     type: "text",
     inputmode: opts.decimal === false ? "numeric" : "decimal",
@@ -428,14 +437,27 @@ export function numInput(opts: {
         const capped = capDecimals(raw, spec.decimals ?? 0);
         if (capped !== raw) { raw = capped; el.value = capped; }
       }
-      if (raw === "") { setInvalid(inp, false); return opts.onInput(null); }
+      if (raw === "") { overridden = null; setInvalid(inp, false); return opts.onInput(null); }
       const n = Number(raw);
       const val = Number.isNaN(n) ? null : n;
       if (spec) {
-        const bad = val != null && !inRange(val, spec);
-        setInvalid(inp, bad, spec.warn);
+        const outOfRange = val != null && !inRange(val, spec);
+        // A confirmed value stays accepted; any other out-of-range value is bad.
+        if (val !== overridden) overridden = null;
+        const bad = outOfRange && val !== overridden;
+        // For override-capable fields, offer a "Use anyway" chip instead of a
+        // plain red block: confirming keeps the value and advances like a valid one.
+        const onUseAnyway = (bad && spec.allowOverride && val != null)
+          ? () => {
+              overridden = val;
+              setInvalid(inp, false);
+              opts.onOverride?.(val);
+              if (opts.onSettled && isSettled(raw, spec)) opts.onSettled(val);
+            }
+          : undefined;
+        setInvalid(inp, bad, spec.warn, onUseAnyway);
         opts.onInput(val);
-        // Auto-advance only when the value is valid AND fully entered.
+        // Auto-advance when the value is valid (or confirmed) AND fully entered.
         if (!bad && val != null && opts.onSettled && isSettled(raw, spec)) opts.onSettled(val);
         return;
       }
@@ -467,11 +489,21 @@ function capDecimals(raw: string, decimals: number): string {
 }
 
 // Toggle the red "invalid reading" state on a field and show the reason inline
-// (a small line right under the input), not as a floating toast.
-function setInvalid(inp: HTMLInputElement, bad: boolean, warn?: string) {
+// (a small line right under the input), not as a floating toast. When
+// `onUseAnyway` is given, a "Use anyway" chip is shown beside the warning so the
+// user can confirm and keep an out-of-range value.
+function setInvalid(inp: HTMLInputElement, bad: boolean, warn?: string, onUseAnyway?: () => void) {
   inp.classList.toggle("invalid", bad);
   const wrap = inp.closest(".field, .cell") as HTMLElement | null;
   wrap?.classList.toggle("invalid", bad);
   const warnEl = wrap?.querySelector<HTMLElement>(".field-warn");
-  if (warnEl) warnEl.textContent = bad ? (warn ?? "Check this reading.") : "";
+  if (!warnEl) return;
+  warnEl.replaceChildren();
+  if (!bad) return;
+  warnEl.append(document.createTextNode(warn ?? "Check this reading."));
+  if (onUseAnyway) {
+    const chip = h("button", { type: "button", class: "use-anyway" }, "Use anyway");
+    chip.addEventListener("click", (e) => { e.preventDefault(); onUseAnyway(); });
+    warnEl.append(chip);
+  }
 }

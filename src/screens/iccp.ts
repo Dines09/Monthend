@@ -33,9 +33,9 @@ const SPECS: Partial<Record<keyof IccpDaily, ReadingSpec>> = {
   seaTemp: { min: 0,    max: 40,   decimals: 0, intDigits: 2, warn: "Sea temp out of range — should be 0–40 °C. Check the reading." },
   cell1:   { min: 150,  max: 250,  decimals: 0, intDigits: 3, warn: "Sensing Cell 1 out of range — should be 150–250 mV. Check the reading." },
   cell2:   { min: 150,  max: 250,  decimals: 0, intDigits: 3, warn: "Sensing Cell 2 out of range — should be 150–250 mV. Check the reading." },
-  amp:     { min: 0,    max: 100,  decimals: 1, intDigits: 2, warn: "Output Amp out of range — should be up to 100 A. Check the reading." },
-  volt:    { min: 2,    max: 20,   decimals: 1, intDigits: 2, warn: "Output Volt out of range — should be 2–20 V. Check the reading." },
-  shaftMv: { min: 0,    max: 50,   decimals: 0, warn: "Shaft potential > 50 mV — check your reading again and check the shaft earthing / bonding system." },
+  amp:     { min: 0,    max: 200,  decimals: 1, intDigits: 2, warn: "Output Amp out of range — should be up to 200 A. Check the reading." },
+  volt:    { min: 2,    max: 40,   decimals: 1, intDigits: 2, warn: "Output Volt out of range — should be 2–40 V. Check the reading." },
+  shaftMv: { min: 0,    max: 50,   decimals: 0, allowOverride: true, warn: "Shaft potential > 50 mV — check your reading again and the shaft earthing / bonding. You can still keep this value if it's correct." },
 };
 
 // Focus jumps to the next field once the current one is validly settled.
@@ -55,7 +55,11 @@ function progressOf(saved: IccpDaily | undefined): { done: number; total: number
     const v = saved?.[k];
     if (v == null) return false;
     const spec = SPECS[k];
-    return !spec || (typeof v === "number" && v >= spec.min && v <= spec.max);
+    if (!spec) return true;
+    // Override-capable readings (e.g. shaft potential) count as done once a
+    // value is present — the range check is only an advisory warning there.
+    if (spec.allowOverride) return typeof v === "number";
+    return typeof v === "number" && v >= spec.min && v <= spec.max;
   }).length;
   return { done, total: keys.length };
 }
@@ -172,6 +176,9 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
         big: true,
         onInput: debounce(async (v) => { await save({ [key]: v }); await refreshRing(true); }, 300),
         onSettled: () => focusNext(key),
+        // "Use anyway" on an out-of-range override field (shaft): keep the value,
+        // advance focus, and let the completion tick fire.
+        onOverride: () => { focusNext(key); void refreshRing(true); },
       });
       inputs.set(key, input);
       return wrap;
@@ -281,10 +288,22 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
     return Object.entries(patch).some(([k, v]) => (saved as any)[k] !== v);
   }
 
-  // ---- header chips: tapping either opens an iOS-style wheel picker ----
-  // The selected-day label lives in the "Today's readings" flow now; the calendar
-  // shows which day is active. Kept as a no-op sync point for the header title.
-  function syncDayLabel() { /* calendar highlight shows the selected day */ }
+  // ---- header: month chip + a compact day chip that toggles the calendar ----
+  // The calendar starts collapsed so the readings get the full scroll height; the
+  // day chip (the selected day number, top-right under the ring) expands it.
+  let calExpanded = false;
+
+  const dayNum = h("span", { class: "dc-n" }, "1");
+  const dayChip = h("button", { class: "daychip", type: "button", "aria-label": "Show calendar",
+    onClick: toggleCalendar }, dayNum, h("span", { class: "dc-cal" }, "📅"));
+  function syncDayLabel() { dayNum.textContent = String(Number(selDate.slice(-2))); }
+
+  function setCalendar(open: boolean) {
+    calExpanded = open;
+    dayhead.classList.toggle("cal-open", open);
+    dayChip.setAttribute("aria-label", open ? "Hide calendar" : "Show calendar");
+  }
+  function toggleCalendar() { setCalendar(!calExpanded); }
 
   const monthLabel = h("div", { class: "mnum" });
   const monthChip = h("button", { class: "monthchip", type: "button", onClick: openMonthWheel }, monthLabel);
@@ -312,8 +331,12 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
 
   // Switch to a specific ISO day (used by the calendar taps and swipe). Handles
   // crossing into another month and refreshes the header + calendar highlight.
-  function selectDay(iso: string, buzz = true) {
+  // `fromCalendar` collapses the calendar again after a pick, so the readings get
+  // the full scroll height back.
+  function selectDay(iso: string, opts: { buzz?: boolean; fromCalendar?: boolean } = {}) {
+    const { buzz = true, fromCalendar = false } = opts;
     if (iso > todayIso) { toast("That's in the future", 1200); return; }
+    if (fromCalendar) setCalendar(false);
     if (iso === selDate) return;
     const nextYm = iso.slice(0, 7);
     selDate = iso;
@@ -353,7 +376,7 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
       const cell = h("button", {
         class: "cal-day", type: "button", disabled: future || undefined,
         "aria-label": `Day ${d}`,
-        onClick: () => selectDay(iso),
+        onClick: () => selectDay(iso, { fromCalendar: true }),
       }, h("span", { class: "cd-n" }, String(d)), h("span", { class: "cd-tick" }, "✓"));
       dayCells.set(iso, cell);
       grid.append(cell);
@@ -388,12 +411,16 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
     for (const [iso, cell] of dayCells) cell.classList.toggle("sel", iso === selDate);
   }
 
-  // Header: month chip (opens month wheel) + progress ring, then the calendar.
+  // Header: month chip on the left; on the right the progress ring with the day
+  // chip beneath it (tap the day number to open the calendar). The calendar sits
+  // below, collapsed by default (a .cal-open class on dayhead reveals it).
   const dayhead = h("div", { class: "dayhead" },
     h("div", { class: "dh-top" },
       h("div", { class: "dh-month" }, monthChip),
-      h("div", { class: "dh-ring" }, ringWrap)),
-    calWrap,
+      h("div", { class: "dh-right" },
+        h("div", { class: "dh-ring" }, ringWrap),
+        dayChip)),
+    h("div", { class: "cal-collapse" }, calWrap),
   );
 
   mount.append(

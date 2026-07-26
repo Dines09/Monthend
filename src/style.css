@@ -356,16 +356,19 @@ select.dayselect {
   padding-left: 34px; /* balance the arrow so the label stays centered */
 }
 
-/* ---- ICCP sticky header: month chip + ring, then the month calendar ---- */
+/* ---- ICCP sticky header: month chip + ring + day chip; calendar collapses ---- */
 .dayhead {
   position: sticky; top: calc(var(--top-h) + env(safe-area-inset-top)); z-index: 10;
   background: var(--bg); padding: 8px 0 10px; margin: -4px 0 8px;
 }
 .dayhead .dh-top {
-  display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px;
-  margin-bottom: 12px;
+  display: grid; grid-template-columns: 1fr auto; align-items: start; gap: 12px;
 }
-.dayhead .dh-month { min-width: 0; }
+.dayhead .dh-month { min-width: 0; align-self: center; }
+/* Right cluster: the "X LEFT" ring, with the day chip directly beneath it. */
+.dayhead .dh-right {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+}
 .monthchip {
   width: 100%; text-align: left;
   background: var(--bg2); border: 1px solid var(--line); color: var(--text);
@@ -374,6 +377,31 @@ select.dayselect {
 }
 .monthchip::after { content: "▾"; color: var(--muted); font-size: 12px; }
 .monthchip:active { filter: brightness(.95); }
+
+/* Day chip: the selected day number that opens/closes the calendar. */
+.daychip {
+  display: inline-flex; align-items: center; gap: 6px; width: auto;
+  background: var(--card2); border: 1px solid var(--line); color: var(--text);
+  border-radius: 999px; padding: 5px 12px 5px 14px; line-height: 1;
+  font-weight: 800; font-size: 15px;
+}
+.daychip .dc-n { letter-spacing: .2px; }
+.daychip .dc-cal { font-size: 13px; filter: grayscale(.15); }
+.daychip:active { transform: scale(.95); }
+.dayhead.cal-open .daychip {
+  background: var(--accent); border-color: var(--accent); color: var(--btn-fg);
+}
+
+/* Collapsible calendar wrapper: closed by default, opens with .cal-open. */
+.cal-collapse {
+  display: grid; grid-template-rows: 0fr; overflow: hidden;
+  transition: grid-template-rows .28s ease, margin-top .28s ease, opacity .2s;
+  opacity: 0; margin-top: 0;
+}
+.cal-collapse > .cal { min-height: 0; }
+.dayhead.cal-open .cal-collapse {
+  grid-template-rows: 1fr; opacity: 1; margin-top: 12px;
+}
 
 /* ---- month calendar ---- */
 .cal {
@@ -465,6 +493,14 @@ label.field.invalid .lab { color: var(--bad); }
 .field-warn:empty { display: none; }
 .cell.invalid { border-color: var(--bad) !important; }
 .cell .field-warn { text-align: center; margin-top: 6px; }
+/* "Use anyway" confirm chip beside an override-field warning. */
+.field-warn .use-anyway {
+  display: inline-block; width: auto; margin: 6px 0 0; padding: 5px 12px;
+  background: var(--bad); color: #fff; border: none; border-radius: 999px;
+  font-size: 12px; font-weight: 700; line-height: 1; cursor: pointer;
+}
+.field-warn .use-anyway:active { filter: brightness(.92); }
+.cell .field-warn .use-anyway { margin-top: 6px; }
 
 /* ---- iOS-style wheel picker (centered themed modal) ---- */
 .wheel-back {
