@@ -35,7 +35,10 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
 
   // ---- gather quick status for the tile badges ----
   const iccpToday = await db.iccpDaily.get(todayIso);
-  const iccpDone = !!(iccpToday && (iccpToday.amp != null || iccpToday.area));
+  // Only a real reading counts as "entered" — `area` is auto-filled the moment
+  // the screen is opened, so testing it would mark untouched days as done.
+  const iccpDone = !!iccpToday &&
+    (["draft", "seaTemp", "amp", "volt", "cell1", "cell2"] as const).some((k) => iccpToday[k] != null);
 
   const { year, month } = ymParts(curYm);
   const sats = saturdaysInMonth(year, month);
@@ -119,6 +122,54 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
 
   const listEl = h("div", {});
 
+  // ---- month-to-date progress, shown as small cards that slide out from under
+  // the record card so the user can see at a glance how much is still pending.
+  const dim = new Date(year, month, 0).getDate();
+  const daysSoFar = Math.min(dim, today.getDate());
+  const iccpRows = await db.iccpDaily
+    .where("date").between(`${curYm}-00`, `${curYm}-99`).toArray();
+  // "Entered" means the user has actually put a reading in — matching the rule
+  // the ICCP card uses, so the two never disagree. The auto-filled area / MGPS
+  // fields don't count, otherwise merely opening a day would mark it done.
+  const READINGS = ["draft", "seaTemp", "amp", "volt", "cell1", "cell2"] as const;
+  const iccpEntered = iccpRows.filter((r) => READINGS.some((k) => r[k] != null)).length;
+  const iccpPending = Math.max(0, daysSoFar - iccpEntered);
+
+  const battBySat = new Map<string, number>();
+  for (const e of await db.battery.toArray()) {
+    if (!e.date.startsWith(curYm)) continue;
+    battBySat.set(e.date, (battBySat.get(e.date) ?? 0) + 1);
+  }
+  const battDone = pastSats.filter((s) => (battBySat.get(s) ?? 0) >= 5).length;
+  const battPending = Math.max(0, pastSats.length - battDone);
+
+  /**
+   * One stat card. `tone` colours the number: green when nothing is pending,
+   * amber when something is, plain otherwise.
+   */
+  function stat(value: string | number, label: string, sub: string, tone: "good" | "warn" | "plain"): HTMLElement {
+    return h("div", { class: `statcard tone-${tone}` },
+      h("div", { class: "sc-val" }, String(value)),
+      h("div", { class: "sc-lab" }, label),
+      h("div", { class: "sc-sub" }, sub));
+  }
+
+  function statsFor(mode: Mode): HTMLElement {
+    const monthName = MONTHS_SHORT[month - 1].toUpperCase();
+    if (mode === "daily") {
+      return h("div", { class: "statrow" },
+        stat(iccpEntered, "Days entered", `of ${daysSoFar} in ${monthName}`, "plain"),
+        stat(iccpPending, "Pending", iccpPending === 0 ? "all caught up" : "days to fill",
+          iccpPending === 0 ? "good" : "warn"));
+    }
+    return h("div", { class: "statrow" },
+      stat(`${battDone}/${pastSats.length}`, "Battery", `Saturdays in ${monthName}`,
+        battPending === 0 ? "good" : "plain"),
+      stat(`${fireDoneUpcoming}/${fireUpcomingDets.length}`, "Fire test",
+        fireSession.plan.label.split("-")[0].slice(0, 3) + " round",
+        fireUpcomingDets.length > 0 && fireDoneUpcoming >= fireUpcomingDets.length ? "good" : "plain"));
+  }
+
   function setMode(mode: Mode) {
     if (mode === active) return;
     active = mode;
@@ -164,6 +215,11 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
           `Next: ${fireUpcomingDets.length} detectors on ${dayLabel(fireUpcoming)}`, "/rec/fire"));
       }
     }
+
+    // Stats slide out from beneath the record card above them.
+    const stats = statsFor(active);
+    listEl.append(stats);
+    requestAnimationFrame(() => stats.classList.add("in"));
   }
 
   mount.append(

@@ -1,6 +1,7 @@
-import { h, topbar, screen, numInput, readingField, toast, segmented, progressRing, achievement, helpTip, longPress, wheelPicker, navigate, type ReadingSpec } from "../ui";
+import { h, topbar, screen, numInput, readingField, toast, segmented, progressRing, achievement, helpTip, longPress, navigate, confirmDialog, type ReadingSpec } from "../ui";
 import { db, type IccpDaily } from "../db";
 import { isoDate, ymParts, debounce, parseIso, saturdaysInMonth, slipringDefault, MONTHS_FULL, DOW_SHORT } from "../util";
+import { periodHead, bindHeadGestures } from "./periodhead";
 
 const AREAS = ["Sea", "Port", "Anchor"];
 const SEA_CHESTS = ["P", "S", "P/S"];
@@ -35,7 +36,9 @@ const SPECS: Partial<Record<keyof IccpDaily, ReadingSpec>> = {
   cell2:   { min: 150,  max: 250,  decimals: 0, intDigits: 3, warn: "Sensing Cell 2 out of range — should be 150–250 mV. Check the reading." },
   amp:     { min: 0,    max: 200,  decimals: 1, intDigits: 2, warn: "Output Amp out of range — should be up to 200 A. Check the reading." },
   volt:    { min: 2,    max: 40,   decimals: 1, intDigits: 2, warn: "Output Volt out of range — should be 2–40 V. Check the reading." },
-  shaftMv: { min: 0,    max: 50,   decimals: 0, allowOverride: true, warn: "Shaft potential > 50 mV — check your reading again and the shaft earthing / bonding. You can still keep this value if it's correct." },
+  // Two digits, so a single keystroke never counts as "finished" and drops the
+  // keyboard while the user is still typing (e.g. 8 on the way to 18).
+  shaftMv: { min: 0,    max: 50,   decimals: 0, intDigits: 2, allowOverride: true, warn: "Shaft potential > 50 mV — check your reading again and the shaft earthing / bonding. You can still keep this value if it's correct." },
 };
 
 // Focus jumps to the next field once the current one is validly settled.
@@ -44,29 +47,45 @@ const SPECS: Partial<Record<keyof IccpDaily, ReadingSpec>> = {
 const ADVANCE_ORDER: (keyof IccpDaily)[] = ["draft", "seaTemp", "amp", "volt", "cell1", "cell2", "shaftMv"];
 
 // Count of today's reading fields already filled (for the progress ring and the
-// calendar's "done" tick). A field only counts when its value is present AND
-// within the valid range, so a half-typed / out-of-range last reading won't trip
-// the "completed" state early. Shaft potential only counts when under way.
+// calendar's "done" tick). A reading counts once a number is present. Values
+// outside the expected band still count: they're flagged red inline, and the
+// user is asked to confirm them when the day completes — blocking completion
+// instead would strand anyone whose genuine reading is out of the usual range.
+// Shaft potential only counts when the ship is under way.
 function progressOf(saved: IccpDaily | undefined): { done: number; total: number } {
   const area = saved?.area ?? "Sea";
   const stationary = STATIONARY.has(area);
   const keys = stationary ? READING_KEYS : [...READING_KEYS, "shaftMv" as keyof IccpDaily];
-  const done = keys.filter((k) => {
-    const v = saved?.[k];
-    if (v == null) return false;
-    const spec = SPECS[k];
-    if (!spec) return true;
-    // Override-capable readings (e.g. shaft potential) count as done once a
-    // value is present — the range check is only an advisory warning there.
-    if (spec.allowOverride) return typeof v === "number";
-    return typeof v === "number" && v >= spec.min && v <= spec.max;
-  }).length;
+  const done = keys.filter((k) => typeof saved?.[k] === "number").length;
   return { done, total: keys.length };
 }
 
 function isComplete(saved: IccpDaily | undefined): boolean {
   const { done, total } = progressOf(saved);
   return total > 0 && done >= total;
+}
+
+/** Human labels for the confirm dialog listing out-of-range readings. */
+const FIELD_LABEL: Partial<Record<keyof IccpDaily, string>> = {
+  draft: "Draft", seaTemp: "Sea temp", cell1: "Sensing Cell 1", cell2: "Sensing Cell 2",
+  amp: "Output Amp", volt: "Output Volt", shaftMv: "Shaft potential",
+};
+
+/**
+ * Readings that are present but sit outside their normal range. These don't
+ * block entry, but the user is asked to confirm them once the day is otherwise
+ * complete — so an obvious typo is caught before the day is marked done.
+ */
+function outOfRangeReadings(saved: IccpDaily | undefined): { label: string; value: number }[] {
+  if (!saved) return [];
+  const out: { label: string; value: number }[] = [];
+  for (const [key, spec] of Object.entries(SPECS) as [keyof IccpDaily, ReadingSpec][]) {
+    const v = saved[key];
+    if (typeof v !== "number") continue;
+    if (v >= spec.min && v <= spec.max) continue;
+    out.push({ label: FIELD_LABEL[key] ?? String(key), value: v });
+  }
+  return out;
 }
 
 export async function renderIccp(_p: Record<string, string>, mount: HTMLElement) {
@@ -103,7 +122,28 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
       // reading settles before celebrating — so the tick lands centered and
       // never pops up mid-typing of the final value.
       (document.activeElement as HTMLElement | null)?.blur?.();
-      setTimeout(() => achievement("Entry completed!", `ICCP / MGPS saved for ${when}`), 1200);
+      const odd = outOfRangeReadings(saved);
+      setTimeout(async () => {
+        // The day is filled, but some readings sit outside their normal band.
+        // Ask once before marking it done, so a mistyped figure gets caught.
+        if (odd.length) {
+          const list = h("div", { class: "oor-list" },
+            ...odd.map((o) => h("div", { class: "oor-item" },
+              h("span", { class: "oor-lab" }, o.label),
+              h("span", { class: "oor-val" }, String(o.value)))));
+          const ok = await confirmDialog({
+            title: odd.length > 1 ? "Readings are out of range" : "Reading is out of range",
+            body: h("div", {},
+              h("div", {}, "These are outside the normal range for this vessel:"),
+              list,
+              h("div", {}, "Submit them anyway?")),
+            confirm: "Yes, submit",
+            cancel: "Go back",
+          });
+          if (!ok) { lastComplete = false; return; }
+        }
+        achievement("Entry completed!", `ICCP / MGPS saved for ${when}`);
+      }, 1200);
     }
     lastComplete = complete;
   }
@@ -290,55 +330,29 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
     return Object.entries(patch).some(([k, v]) => (saved as any)[k] !== v);
   }
 
-  // ---- header: month chip + a circular day chip that toggles the calendar ----
-  // The calendar starts open. As soon as the user swipes/scrolls the readings it
-  // collapses into the circular day chip (weekday on top, date under it); tapping
-  // that circle expands the calendar again.
-  let calExpanded = true;
+  // ---- header: the shared one-line period header ----
+  // Month chip · day chip · progress ring all share a single row; the calendar
+  // lives in the collapsible panel underneath. Pull down at the top to open it.
+  const head = periodHead({
+    ym: curYm,
+    open: false,
+    onMonth: (ym) => {
+      curYm = ym; rebuildDays(); syncDayLabel();
+      void buildCalendar(); loadDay();
+    },
+  });
 
   const dayDow = h("span", { class: "dc-dow" }, "");
   const dayNum = h("span", { class: "dc-n" }, "1");
-  const dayChip = h("button", { class: "daychip", type: "button", "aria-label": "Hide calendar",
-    onClick: toggleCalendar }, dayDow, dayNum);
+  const dayChip = h("button", { class: "daychip", type: "button", "aria-label": "Show calendar",
+    onClick: () => head.toggle() }, dayDow, dayNum);
   function syncDayLabel() {
     dayNum.textContent = String(Number(selDate.slice(-2)));
     dayDow.textContent = DOW_SHORT[parseIso(selDate).getDay()];
     dayChip.classList.toggle("is-today", selDate === todayIso);
   }
 
-  function setCalendar(open: boolean) {
-    calExpanded = open;
-    dayhead.classList.toggle("cal-open", open);
-    dayChip.setAttribute("aria-label", open ? "Hide calendar" : "Show calendar");
-  }
-  function toggleCalendar() { setCalendar(!calExpanded); }
-  // Any scroll / swipe gesture on the screen tucks the calendar away so the
-  // readings get the full height back.
-  function collapseCalendar() { if (calExpanded) setCalendar(false); }
-
-  const monthLabel = h("div", { class: "mnum" });
-  const monthChip = h("button", { class: "monthchip", type: "button", onClick: openMonthWheel }, monthLabel);
-  function syncMonthLabel() {
-    const { month } = ymParts(curYm);
-    monthLabel.textContent = `${MONTHS_FULL[month - 1]} ${curYm.slice(0, 4)}`;
-  }
-
-  // Month wheel: months scroll, the year stays fixed beside them. Changing the
-  // month rebuilds the calendar and clamps the selected day into the new month.
-  function openMonthWheel() {
-    const year = today.getFullYear();
-    const maxM = today.getMonth() + 1; // don't allow future months
-    const options = MONTHS_FULL.slice(0, maxM).map((name, i) => ({
-      value: `${year}-${String(i + 1).padStart(2, "0")}`, text: name,
-    }));
-    wheelPicker({
-      columns: [{ label: String(year), options, value: curYm }],
-      onDone: ([ym]) => {
-        curYm = ym; syncMonthLabel(); rebuildDays(); syncDayLabel();
-        void buildCalendar(); loadDay();
-      },
-    });
-  }
+  function setCalendar(open: boolean) { head.setOpen(open); }
 
   // Switch to a specific ISO day (used by the calendar taps and swipe). Handles
   // crossing into another month and refreshes the header + calendar highlight.
@@ -351,7 +365,7 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
     if (iso === selDate) return;
     const nextYm = iso.slice(0, 7);
     selDate = iso;
-    if (nextYm !== curYm) { curYm = nextYm; rebuildDays(); syncMonthLabel(); void buildCalendar(); }
+    if (nextYm !== curYm) { curYm = nextYm; rebuildDays(); head.syncMonth(curYm); void buildCalendar(); }
     syncDayLabel();
     markSelectedDay();
     loadDay();
@@ -422,81 +436,30 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
     for (const [iso, cell] of dayCells) cell.classList.toggle("sel", iso === selDate);
   }
 
-  // Header: month chip on the left; on the right the progress ring with the day
-  // chip beneath it (tap the day number to open the calendar). The calendar sits
-  // below, collapsed by default (a .cal-open class on dayhead reveals it).
-  const dayhead = h("div", { class: "dayhead" },
-    h("div", { class: "dh-top" },
-      h("div", { class: "dh-month" }, monthChip),
-      h("div", { class: "dh-right" },
-        h("div", { class: "dh-ring" }, ringWrap),
-        dayChip)),
-    h("div", { class: "cal-collapse" }, calWrap),
-  );
+  // Assemble the shared header: day chip in the middle slot, ring on the right,
+  // calendar in the collapsible panel.
+  head.slot.append(dayChip);
+  head.right.append(ringWrap);
+  head.panel.append(calWrap);
 
   mount.append(
     topbar("ICCP / MGPS Daily", "Daily readings", "/records"),
     screen(
-      dayhead,
-      h("div", { class: "swipehint" }, "‹ swipe to change day · scroll to tuck the calendar away ›"),
+      head.el,
+      h("div", { class: "ph-pull" }, "‹ swipe to change day · pull down for calendar ›"),
       form,
       monthlyBtn
     )
   );
 
-  // ---- swipe left/right on empty space to change day ----
-  // Uses touch/pointer start+end coords. Ignores swipes that begin on an
-  // interactive control (input/select/button/segment/tiles) so it never fights
-  // with typing or the segmented controls, but works anywhere else on the screen.
+  // Standard gestures: pull down at the top opens the calendar, scrolling
+  // collapses it, and a horizontal swipe steps the day.
   const view = mount.querySelector<HTMLElement>(".screen")!;
-  let sx = 0, sy = 0, tracking = false;
-  const startsOnControl = (t: EventTarget | null) =>
-    (t as HTMLElement | null)?.closest?.("input, select, textarea, button, .seg, .tilegrid");
-  const onStart = (x: number, y: number, t: EventTarget | null) => {
-    if (startsOnControl(t)) { tracking = false; return; }
-    sx = x; sy = y; tracking = true;
-  };
-  const onMove = (x: number, y: number) => {
-    if (!tracking) return;
-    // Any real drag — in any direction — tucks the calendar away immediately, so
-    // the user sees the readings as soon as they start moving.
-    if (Math.hypot(x - sx, y - sy) > 24) collapseCalendar();
-  };
-  const onEnd = (x: number, y: number) => {
-    if (!tracking) return;
-    tracking = false;
-    const dx = x - sx, dy = y - sy;
-    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.4) {
-      goDay(dx < 0 ? 1 : -1); // swipe left -> next day, right -> previous day
-    }
-  };
-  view.addEventListener("touchstart", (e) => {
-    const t = e.touches[0]; onStart(t.clientX, t.clientY, e.target);
-  }, { passive: true });
-  view.addEventListener("touchmove", (e) => {
-    const t = e.touches[0]; onMove(t.clientX, t.clientY);
-  }, { passive: true });
-  view.addEventListener("touchend", (e) => {
-    const t = e.changedTouches[0]; onEnd(t.clientX, t.clientY);
-  }, { passive: true });
-  // Pointer fallback for desktop / mouse-drag testing.
-  view.addEventListener("pointerdown", (e) => { if (e.pointerType !== "touch") onStart(e.clientX, e.clientY, e.target); });
-  view.addEventListener("pointermove", (e) => { if (e.pointerType !== "touch") onMove(e.clientX, e.clientY); });
-  view.addEventListener("pointerup", (e) => { if (e.pointerType !== "touch") onEnd(e.clientX, e.clientY); });
-  // Scrolling the page (wheel, momentum scroll, keyboard) also collapses it.
-  const onScroll = () => { if (window.scrollY > 8) collapseCalendar(); };
-  window.addEventListener("scroll", onScroll, { passive: true });
-  view.addEventListener("wheel", collapseCalendar, { passive: true });
-  // The screen is rebuilt on every navigation, so drop the window listener when
-  // this view leaves the DOM.
-  new MutationObserver((_m, obs) => {
-    if (!view.isConnected) { window.removeEventListener("scroll", onScroll); obs.disconnect(); }
-  }).observe(mount, { childList: true });
+  bindHeadGestures(view, head, { onSwipeX: (dir) => goDay(dir) });
 
   rebuildDays();
   syncDayLabel();
-  syncMonthLabel();
-  setCalendar(true); // opens expanded; the first swipe/scroll tucks it away
+  head.syncMonth(curYm);
   await buildCalendar();
   await loadDay();
 }

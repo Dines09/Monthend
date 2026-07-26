@@ -1,8 +1,8 @@
-import { h, topbar, screen, numInput, toast, segmented, type ReadingSpec } from "../ui";
+import { h, topbar, screen, numInput, toast, segmented, progressRing, type ReadingSpec } from "../ui";
 import { db, type BatteryEntry } from "../db";
 import { masters } from "../seed";
-import { saturdaysInMonth, ymParts, debounce, ddMmmYyyy } from "../util";
-import { monthPicker, toolbar } from "./parts";
+import { saturdaysInMonth, ymParts, debounce, ddMmmYyyy, parseIso, MONTHS_SHORT, isoDate } from "../util";
+import { periodHead, bindHeadGestures } from "./periodhead";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -18,8 +18,8 @@ export async function renderBattery(_p: Record<string, string>, mount: HTMLEleme
   let selDate = "";
   let bankIdx = 0;
 
+  const todayIso = isoDate(today);
   const banks = masters.batteryBanks;
-  const dateSelect = h("select", { class: "dayselect" });
   const bankSeg = segmented({
     options: banks.map((b: any) => b.id),
     labels: banks.map((b: any) => shortBankName(b)),
@@ -28,14 +28,66 @@ export async function renderBattery(_p: Record<string, string>, mount: HTMLEleme
     onPick: (v) => { bankIdx = banks.findIndex((b: any) => b.id === v); renderBank(); },
   });
   const body = h("div", {});
+  const ringWrap = h("div", {});
+
+  // Same one-line header as ICCP: month chip · Saturday chip · progress ring,
+  // with the Saturday picker in the panel that pulls down.
+  const head = periodHead({
+    ym: curYm,
+    open: false,
+    onMonth: (ym) => { curYm = ym; rebuildDates(); buildSatPanel(); renderBank(); },
+  });
+
+  // The collapsed control: which Saturday is being entered. Tapping it opens
+  // the panel of Saturdays, mirroring ICCP's day chip → calendar.
+  const satLab = h("span", { class: "sat-chip-lab" }, "");
+  const satChip = h("button", { class: "satchip", type: "button", "aria-label": "Choose Saturday",
+    onClick: () => head.toggle() }, h("span", { class: "sat-chip-k" }, "SAT"), satLab);
+
+  function syncSatChip() {
+    satLab.textContent = selDate
+      ? `${String(parseIso(selDate).getDate()).padStart(2, "0")} ${MONTHS_SHORT[parseIso(selDate).getMonth()].toUpperCase()}`
+      : "—";
+    satChip.classList.toggle("is-today", selDate === todayIso);
+  }
 
   function rebuildDates() {
-    dateSelect.replaceChildren();
     const { year, month } = ymParts(curYm);
     const sats = saturdaysInMonth(year, month);
-    for (const s of sats) dateSelect.append(h("option", { value: s, selected: s === selDate }, `Saturday · ${ddMmmYyyy(s)}`));
     if (!sats.includes(selDate)) selDate = sats[0] ?? "";
-    dateSelect.value = selDate;
+    syncSatChip();
+  }
+
+  /** Panel: one tappable card per Saturday, showing how many banks are done. */
+  async function buildSatPanel() {
+    const { year, month } = ymParts(curYm);
+    const sats = saturdaysInMonth(year, month);
+    const counts = new Map<string, number>();
+    for (const e of await db.battery.toArray()) {
+      if (e.date.startsWith(curYm)) counts.set(e.date, (counts.get(e.date) ?? 0) + 1);
+    }
+    head.panel.replaceChildren(
+      h("div", { class: "satgrid" },
+        ...sats.map((s) => {
+          const n = counts.get(s) ?? 0;
+          const done = n >= banks.length;
+          const future = s > todayIso;
+          return h("button", {
+            class: `satcard${s === selDate ? " sel" : ""}${done ? " done" : ""}${future ? " future" : ""}`,
+            type: "button",
+            onClick: () => { selDate = s; syncSatChip(); head.setOpen(false); void buildSatPanel(); renderBank(); },
+          },
+            h("span", { class: "st-d" }, String(parseIso(s).getDate()).padStart(2, "0")),
+            h("span", { class: "st-m" }, MONTHS_SHORT[parseIso(s).getMonth()].toUpperCase()),
+            h("span", { class: "st-n" }, done ? "✓" : `${n}/${banks.length}`));
+        })));
+  }
+
+  /** Ring over the banks completed on the selected Saturday. */
+  async function refreshRing() {
+    if (!selDate) { ringWrap.replaceChildren(); return; }
+    const n = await db.battery.where("date").equals(selDate).count();
+    ringWrap.replaceChildren(progressRing(Math.min(n, banks.length), banks.length, "left"));
   }
 
   async function renderBank() {
@@ -127,24 +179,34 @@ export async function renderBattery(_p: Record<string, string>, mount: HTMLEleme
       if (cur?.id) await db.battery.update(cur.id, entry);
       else await db.battery.add(entry);
       toast("Saved", 700);
+      // Keep the header ring and the Saturday panel counts in step with the edit.
+      await refreshRing();
+      await buildSatPanel();
     }
   }
 
-  dateSelect.addEventListener("change", () => { selDate = dateSelect.value; renderBank(); });
+  head.slot.append(satChip);
+  head.right.append(ringWrap);
 
   mount.append(
     topbar("Battery Log", "TEC(A) 17 · Weekly", "/records"),
     screen(
-      toolbar(monthPicker(curYm, (v) => { curYm = v; rebuildDates(); renderBank(); }, today.getFullYear()), h("span", { class: "progress" }, "Sat")),
-      dateSelect,
-      h("div", { style: { height: "10px" } }),
+      head.el,
+      h("div", { class: "ph-pull" }, "pull down to choose Saturday"),
       bankSeg,
       h("div", { style: { height: "12px" } }),
       body
     )
   );
+
+  // Same gestures as every other dated screen.
+  const view = mount.querySelector<HTMLElement>(".screen")!;
+  bindHeadGestures(view, head);
+
   rebuildDates();
+  await buildSatPanel();
   await renderBank();
+  await refreshRing();
 }
 
 function shortBankName(b: any): string {

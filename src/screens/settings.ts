@@ -1,4 +1,4 @@
-import { h, topbar, screen, toast, navigate } from "../ui";
+import { h, topbar, screen, toast, passwordPrompt } from "../ui";
 import { db, getSetting, setSetting } from "../db";
 import { debounce } from "../util";
 import { hapticsEnabled, setHaptics, tapFeedback } from "../feedback";
@@ -77,8 +77,19 @@ async function importBackup(e: Event) {
   setTimeout(() => location.reload(), 800);
 }
 
+/** Code that has to be entered before the records can be wiped. */
+const RESET_CODE = "0000";
+
 async function resetAll() {
-  if (!confirm("This clears all entries and re-seeds from the original June files. Continue?")) return;
+  // Password-gated: this throws away every entry the user has made, so a
+  // mis-tap — or someone else poking at the phone — must not be enough.
+  const ok = await passwordPrompt({
+    title: "Reset app?",
+    body: "This clears every entry you have made and re-seeds from the original files. Enter the reset password to continue.",
+    code: RESET_CODE,
+    confirm: "Reset everything",
+  });
+  if (!ok) return;
   await db.delete();
   location.reload();
 }

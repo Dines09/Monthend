@@ -78,9 +78,46 @@ async function boot() {
 
 boot();
 
-// register service worker (production only; injected file)
+// Register the service worker (production only; the file is generated at build
+// time). Once it has installed, the app runs entirely from the cache — no
+// network is needed again until a new version is published.
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js").catch(() => {});
+  window.addEventListener("load", async () => {
+    try {
+      const reg = await navigator.serviceWorker.register("./sw.js");
+      // Only look for a new build when there's actually a connection; an
+      // update check while offline is a guaranteed failure and must stay silent.
+      const checkForUpdate = () => { if (navigator.onLine) reg.update().catch(() => {}); };
+      checkForUpdate();
+      window.addEventListener("online", checkForUpdate);
+      // A fresh worker finished installing while an old one is still serving.
+      reg.addEventListener("updatefound", () => {
+        const sw = reg.installing;
+        if (!sw) return;
+        sw.addEventListener("statechange", () => {
+          if (sw.state === "installed" && navigator.serviceWorker.controller) notifyUpdate(reg);
+        });
+      });
+    } catch { /* offline or unsupported — the app still runs from cache */ }
   });
+
+  // Reload once the new worker takes control, so the user lands on the new build.
+  let reloading = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (reloading) return;
+    reloading = true;
+    location.reload();
+  });
+}
+
+/** Offer the waiting update rather than forcing a reload mid-entry. */
+function notifyUpdate(reg: ServiceWorkerRegistration) {
+  const bar = h("div", { class: "updatebar" },
+    h("span", {}, "A new version is available."),
+    h("button", {
+      class: "btn",
+      onClick: () => reg.waiting?.postMessage("skip-waiting"),
+    }, "Update"));
+  document.body.append(bar);
+  requestAnimationFrame(() => bar.classList.add("show"));
 }

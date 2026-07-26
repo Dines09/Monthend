@@ -258,6 +258,86 @@ export function achievement(msg = "All entries complete!", sub = "") {
   setTimeout(close, 2600);
 }
 
+// ---- themed confirm dialog (replaces window.confirm) ----
+// Resolves true only if the user taps the confirm button. `danger` paints that
+// button red for destructive actions.
+export function confirmDialog(opts: {
+  title: string;
+  body?: string | Node;
+  confirm?: string;
+  cancel?: string;
+  danger?: boolean;
+}): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      back.classList.remove("show");
+      setTimeout(() => back.remove(), 220);
+      resolve(ok);
+    };
+    const okBtn = h("button", { class: `btn${opts.danger ? " danger" : ""}`, type: "button",
+      onClick: () => finish(true) }, opts.confirm ?? "Confirm");
+    const noBtn = h("button", { class: "btn secondary", type: "button",
+      onClick: () => finish(false) }, opts.cancel ?? "Cancel");
+    const card = h("div", { class: "confirm-card", onClick: (e: Event) => e.stopPropagation() },
+      h("div", { class: "cf-title" }, opts.title),
+      opts.body ? h("div", { class: "cf-body" }, opts.body as any) : null,
+      h("div", { class: "cf-actions" }, noBtn, okBtn));
+    const back = h("div", { class: "confirm-back", onClick: () => finish(false) }, card);
+    document.body.append(back);
+    requestAnimationFrame(() => back.classList.add("show"));
+  });
+}
+
+// ---- password gate ----
+// Guards a destructive action behind a fixed code. Resolves true only when the
+// entered code matches. Used so a stray tap can never wipe the records.
+export function passwordPrompt(opts: {
+  title: string;
+  body?: string;
+  code: string;
+  confirm?: string;
+}): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      back.classList.remove("show");
+      setTimeout(() => back.remove(), 220);
+      resolve(ok);
+    };
+    const err = h("div", { class: "cf-err" }, "");
+    const input = h("input", {
+      type: "password", inputmode: "numeric", class: "cf-pass",
+      placeholder: "••••", "aria-label": "Password", autocomplete: "off",
+    }) as HTMLInputElement;
+    const attempt = () => {
+      if (input.value === opts.code) return finish(true);
+      err.textContent = "Wrong password.";
+      input.value = "";
+      input.focus();
+      if (hapticsEnabled()) { try { navigator.vibrate?.([30, 60, 30]); } catch { /* ignore */ } }
+    };
+    input.addEventListener("input", () => { err.textContent = ""; });
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") attempt(); });
+    const okBtn = h("button", { class: "btn danger", type: "button", onClick: attempt },
+      opts.confirm ?? "Confirm");
+    const noBtn = h("button", { class: "btn secondary", type: "button",
+      onClick: () => finish(false) }, "Cancel");
+    const card = h("div", { class: "confirm-card", onClick: (e: Event) => e.stopPropagation() },
+      h("div", { class: "cf-title" }, opts.title),
+      opts.body ? h("div", { class: "cf-body" }, opts.body) : null,
+      input, err,
+      h("div", { class: "cf-actions" }, noBtn, okBtn));
+    const back = h("div", { class: "confirm-back", onClick: () => finish(false) }, card);
+    document.body.append(back);
+    requestAnimationFrame(() => { back.classList.add("show"); input.focus(); });
+  });
+}
+
 // ---- iOS-style wheel picker (centered themed modal) ----
 // One or more scrollable columns with a fixed center highlight; the selected
 // item sits big in the middle while neighbours fade/shrink into an arc. Snap
@@ -404,6 +484,11 @@ export function inRange(v: number | null, spec: ReadingSpec): boolean {
 }
 
 // numeric input helper
+// How long a settled value waits before focus moves on. Without this the
+// keyboard vanishes the instant the last digit lands, which reads as the app
+// snatching the field away mid-entry — and leaves no room to correct a typo.
+const SETTLE_DELAY = 500;
+
 export function numInput(opts: {
   value?: number | null;
   placeholder?: string;
@@ -418,6 +503,15 @@ export function numInput(opts: {
   onOverride?: (v: number) => void;
 }): HTMLInputElement {
   const spec = opts.spec;
+  // Pending auto-advance. Any further keystroke cancels it, so a user who is
+  // still typing (e.g. correcting "8" to "18") is never interrupted.
+  let settleTimer: any;
+  const scheduleSettle = (v: number) => {
+    clearTimeout(settleTimer);
+    if (!opts.onSettled) return;
+    settleTimer = setTimeout(() => opts.onSettled!(v), SETTLE_DELAY);
+  };
+  const cancelSettle = () => clearTimeout(settleTimer);
   // The value the user has explicitly confirmed via "Use anyway", so we don't
   // keep flagging it red. Reset whenever the raw text changes to something else.
   let overridden: number | null = null;
@@ -431,6 +525,8 @@ export function numInput(opts: {
     onInput: (e: Event) => {
       const el = e.target as HTMLInputElement;
       let raw = el.value.trim();
+      // A new keystroke always supersedes a pending advance.
+      cancelSettle();
       // Clamp to the allowed number of decimal places while typing so a decimal
       // field like draft only ever holds one digit after the point.
       if (spec && (spec.decimals ?? 0) >= 0) {
@@ -457,13 +553,18 @@ export function numInput(opts: {
           : undefined;
         setInvalid(inp, bad, spec.warn, onUseAnyway);
         opts.onInput(val);
-        // Auto-advance when the value is valid (or confirmed) AND fully entered.
-        if (!bad && val != null && opts.onSettled && isSettled(raw, spec)) opts.onSettled(val);
+        // Auto-advance when the value is valid (or confirmed) AND fully entered
+        // — but only after a short pause, so the keyboard doesn't snap away
+        // while the user is still entering or fixing the number.
+        if (!bad && val != null && isSettled(raw, spec)) scheduleSettle(val);
         return;
       }
       opts.onInput(val);
     },
   });
+  // If the user moves on themselves (taps another field, dismisses the
+  // keyboard), a queued advance must not yank focus somewhere afterwards.
+  inp.addEventListener("blur", cancelSettle);
   return inp;
 }
 

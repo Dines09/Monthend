@@ -243,7 +243,9 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
           `${ddMon(s)}${mark} — ${doneCnt}/${cnt}${doneCnt >= cnt ? " ✓" : ""}`));
       }
       picker.value = sessionSat;
-      picker.addEventListener("change", () => { sessionSat = picker.value; recordDate = sessionSat; paint(); });
+      picker.addEventListener("change", () => {
+        sessionSat = picker.value; recordDate = sessionSat; paint(); syncSticky();
+      });
 
       const dateInput = h("input", { type: "date", value: recordDate, class: "rec-date" }) as HTMLInputElement;
       dateInput.addEventListener("change", () => { if (dateInput.value) { recordDate = dateInput.value; paint(); } });
@@ -284,19 +286,59 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
         renderZoned(listEl, shown, tested, (d) => plan.satOfDet.get(d.detKey)!, true);
       }
     }
+
+    // Keep the pinned summary's count in step with what was just rendered.
+    void syncStickyCount();
   }
 
   const viewSeg = segmented({
     options: ["session", "all"],
     labels: ["This Saturday", `All ${plan.total}`],
     value: view,
-    onPick: (v) => { view = v as any; paint(); },
+    onPick: (v) => { view = v as any; paint(); syncSticky(); },
     compact: true,
   });
+
+  // ---- sticky session bar ----
+  // As the hero card scrolls out of view, the answer to "which Saturday am I on
+  // and how far am I" must stay on screen — so a condensed version of it pins
+  // under the top bar instead of disappearing with the card.
+  const stickyDate = h("span", { class: "fs-date" }, "");
+  const stickyMeta = h("span", { class: "fs-meta" }, "");
+  const stickyCount = h("span", { class: "chip due fs-count" }, "");
+  const stickyBar = h("div", { class: "firesticky" },
+    h("div", { class: "fs-body" }, stickyDate, stickyMeta), stickyCount);
+
+  function syncSticky() {
+    const dets = view === "session" ? (plan.bySat.get(sessionSat) ?? []) : null;
+    if (dets) {
+      const areas = [...new Set(dets.map(areaHeading))];
+      stickyDate.textContent = ddMon(sessionSat);
+      stickyMeta.textContent = `${dets.length} detectors · ${areas.length} areas`;
+    } else {
+      stickyDate.textContent = `${plan.label} ${plan.year}`;
+      stickyMeta.textContent = `${plan.total} detectors · full cycle`;
+    }
+  }
+
+  /** Fill in the live tested/total count on the sticky bar. */
+  async function syncStickyCount() {
+    const tested = await testedThisQuarter();
+    if (view === "session") {
+      const dets = plan.bySat.get(sessionSat) ?? [];
+      const n = dets.filter((d) => tested.has(d.detKey)).length;
+      stickyCount.textContent = `${n}/${dets.length}`;
+      stickyCount.className = `chip ${n >= dets.length && dets.length > 0 ? "done" : "due"} fs-count`;
+    } else {
+      stickyCount.textContent = `${tested.size}/${plan.total}`;
+      stickyCount.className = `chip ${tested.size >= plan.total ? "done" : "due"} fs-count`;
+    }
+  }
 
   mount.append(
     topbar("Fire Detector Test", `${plan.label} ${plan.year}`, "/records"),
     screen(
+      stickyBar,
       viewSeg,
       h("div", { style: { height: "10px" } }),
       summaryEl,
@@ -305,7 +347,19 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
       listEl
     )
   );
+
+  // The bar only appears once the hero card it summarises has scrolled away.
+  const onScroll = () => stickyBar.classList.toggle("show", window.scrollY > 120);
+  window.addEventListener("scroll", onScroll, { passive: true });
+  onScroll();
+  const screenEl = mount.querySelector<HTMLElement>(".screen")!;
+  new MutationObserver((_m, obs) => {
+    if (!screenEl.isConnected) { window.removeEventListener("scroll", onScroll); obs.disconnect(); }
+  }).observe(mount, { childList: true });
+
+  syncSticky();
   await paint();
+  await syncStickyCount();
 }
 
 /** How many of the given detectors are already tested this quarter. */
