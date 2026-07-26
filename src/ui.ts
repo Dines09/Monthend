@@ -150,12 +150,24 @@ export function themeToggle(): HTMLButtonElement {
   return btn;
 }
 
+/** Magnifier that opens the app-wide search. Sits beside the theme toggle. */
+export function searchButton(): HTMLButtonElement {
+  const btn = h("button", {
+    class: "themebtn searchbtn",
+    title: "Search everything",
+    "aria-label": "Search everything",
+    onClick: () => navigate("/search"),
+  }, "🔍");
+  return btn;
+}
+
 export function topbar(title: string, sub?: string, back?: string): HTMLElement {
   return h(
     "div",
     { class: "topbar" },
     back ? h("button", { class: "back", onClick: () => navigate(back) }, "‹") : null,
     h("h1", {}, title, sub ? h("div", { class: "sub" }, sub) : null),
+    searchButton(),
     themeToggle()
   );
 }

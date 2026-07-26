@@ -1,13 +1,17 @@
-import { h, topbar, screen, numInput } from "../ui";
+import { h, topbar, screen, numInput, progressRing } from "../ui";
 import { db } from "../db";
 import { masters } from "../seed";
 import { ym as ymOf, defaultReportYm, debounce } from "../util";
-import { monthPicker, toolbar } from "./parts";
+import { periodHead, bindHeadGestures } from "./periodhead";
 
 export async function renderFreon(_p: Record<string, string>, mount: HTMLElement) {
   let curYm = defaultReportYm();
   const body = h("div", {});
-  const prog = h("span", { class: "progress" });
+  const ringWrap = h("div", {});
+  const head = periodHead({
+    ym: curYm, open: false,
+    onMonth: (ym) => { curYm = ym; load(); },
+  });
 
   async function load() {
     body.replaceChildren();
@@ -53,23 +57,24 @@ export async function renderFreon(_p: Record<string, string>, mount: HTMLElement
           h("strong", {}, `ROB end of month: ${robPreview.robEnd} kg`)))
     );
 
-    prog.textContent = `${filled}/${masters.freonSystems.length} systems`;
+    ringWrap.replaceChildren(progressRing(filled, masters.freonSystems.length, "left"));
     async function recount() {
       const r = await db.freon.where("ym").equals(curYm).count();
-      prog.textContent = `${r}/${masters.freonSystems.length} systems`;
-      const rp = await computeRob(curYm);
-      // update preview card text
+      ringWrap.replaceChildren(progressRing(r, masters.freonSystems.length, "left"));
     }
   }
+
+  head.right.append(ringWrap);
 
   mount.append(
     topbar("Freon Consumption", "TEC(A) 33", "/records"),
     screen(
-      toolbar(monthPicker(curYm, (v) => { curYm = v; load(); }), prog),
+      head.el,
       h("p", { class: "hint" }, "Enter kg consumed per system. ROB (remaining on board) is auto-calculated from previous months + received."),
       body
     )
   );
+  bindHeadGestures(mount.querySelector<HTMLElement>(".screen")!, head);
   await load();
 }
 

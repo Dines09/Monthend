@@ -1,14 +1,26 @@
-import { h, topbar, screen, numInput } from "../ui";
+import { h, topbar, screen, numInput, progressRing } from "../ui";
 import { db } from "../db";
 import { masters } from "../seed";
 import { ym as ymOf, defaultReportYm, debounce } from "../util";
-import { monthPicker, toolbar } from "./parts";
+import { periodHead, bindHeadGestures } from "./periodhead";
+import { matchRow, highlight, hitChips, type SearchField } from "../search";
 
 export async function renderVibration(_p: Record<string, string>, mount: HTMLElement) {
   let curYm = defaultReportYm();
   let filter = "";
   const listEl = h("div", {});
-  const prog = h("span", { class: "progress" });
+  const ringWrap = h("div", {});
+  const countEl = h("div", { class: "hint search-count" }, "");
+
+  const head = periodHead({
+    ym: curYm, open: false,
+    onMonth: (ym) => { curYm = ym; load(); },
+  });
+
+  const motorFields = (mo: any): SearchField[] => [
+    { label: "Motor", text: mo.name || "", hidden: true },
+    ...(mo.rating ? [{ label: "Rating", text: `${mo.rating} KW`, units: ["kw"] }] : []),
+  ];
 
   async function load() {
     const rows = await db.motorVibration.where("ym").equals(curYm).toArray();
@@ -19,12 +31,15 @@ export async function renderVibration(_p: Record<string, string>, mount: HTMLEle
 
   function render(map: Map<string, { vel?: number | null; acc?: number | null }>) {
     listEl.replaceChildren();
-    const f = filter.trim().toLowerCase();
+    const q = filter.trim();
     const filledMotors = new Set<number>();
     for (const [k, v] of map) if (v.vel != null || v.acc != null) filledMotors.add(Number(k.split(":")[0]));
 
+    let shown = 0;
     for (const mo of masters.vibrationMotors) {
-      if (f && !mo.name.toLowerCase().includes(f)) continue;
+      const hits = matchRow(motorFields(mo), q);
+      if (hits === null) continue;
+      shown++;
       const ends: Node[] = [];
       for (const end of ["drive", "free"] as const) {
         const cur = map.get(`${mo.row}:${end}`) ?? {};
@@ -39,32 +54,51 @@ export async function renderVibration(_p: Record<string, string>, mount: HTMLEle
         );
       }
       listEl.append(
-        h("div", { class: `card ${filledMotors.has(mo.row) ? "" : ""}`, style: { padding: "12px 14px" } },
-          h("div", { style: { fontWeight: "700", fontSize: "14px" } }, mo.name,
+        h("div", { class: "card", style: { padding: "12px 14px" } },
+          h("div", { style: { fontWeight: "700", fontSize: "14px" } },
+            q ? highlight(mo.name, q) : mo.name,
             mo.rating ? h("span", { style: { color: "var(--muted)", fontWeight: "400" } }, `  (${mo.rating} KW)`) : null),
+          hitChips(hits, q, { Rating: ["kw"] }),
           ...ends)
       );
     }
-    prog.textContent = `${filledMotors.size}/${masters.vibrationMotors.length} motors`;
+    countEl.textContent = q ? `${shown} of ${masters.vibrationMotors.length} motors match “${q}”` : "";
+    if (shown === 0) {
+      listEl.append(h("div", { class: "list-empty" },
+        h("div", { class: "big" }, "🔍"), h("div", {}, `Nothing matches “${q}”.`)));
+    }
+    setRing(filledMotors.size);
+  }
+
+  function setRing(n: number) {
+    ringWrap.replaceChildren(progressRing(n, masters.vibrationMotors.length, "left"));
   }
 
   async function recount() {
     const rows = await db.motorVibration.where("ym").equals(curYm).toArray();
     const s = new Set(rows.filter((r) => r.vel != null || r.acc != null).map((r) => r.motorRow));
-    prog.textContent = `${s.size}/${masters.vibrationMotors.length} motors`;
+    setRing(s.size);
   }
 
-  const search = h("input", { type: "search", placeholder: "Search motor…", oninput: (e: Event) => { filter = (e.target as HTMLInputElement).value; load(); } });
+  const search = h("input", {
+    type: "search", placeholder: "Motor or rating (e.g. 12 KW)…",
+    "aria-label": "Search motors",
+    onInput: (e: Event) => { filter = (e.target as HTMLInputElement).value; load(); },
+  });
+
+  head.right.append(ringWrap);
 
   mount.append(
     topbar("Motor Vibration", "TEC(A) 15", "/records"),
     screen(
-      toolbar(monthPicker(curYm, (v) => { curYm = v; load(); }), prog),
+      head.el,
       h("p", { class: "hint" }, "Two boxes per end: Velocity (Vel) and Acceleration (Acc). Leave blank if motor not running."),
-      h("div", { class: "searchbar", style: { marginBottom: "10px" } }, search),
+      h("div", { class: "searchbar", style: { marginBottom: "6px" } }, search),
+      countEl,
       listEl
     )
   );
+  bindHeadGestures(mount.querySelector<HTMLElement>(".screen")!, head);
   await load();
 }
 

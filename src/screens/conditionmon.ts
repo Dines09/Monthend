@@ -1,14 +1,28 @@
-import { h, topbar, screen, numInput, toast, segmented } from "../ui";
+import { h, topbar, screen, numInput, toast, segmented, progressRing } from "../ui";
 import { db } from "../db";
 import { masters } from "../seed";
-import { ym as ymOf, defaultReportYm, debounce } from "../util";
-import { monthPicker, toolbar } from "./parts";
+import { defaultReportYm, debounce } from "../util";
+import { periodHead, bindHeadGestures } from "./periodhead";
+import { matchRow, highlight, hitChips, type SearchField } from "../search";
 
 export async function renderConditionMon(_p: Record<string, string>, mount: HTMLElement) {
   let curYm = defaultReportYm();
   let tab: "temp" | "vib" = "temp";
+  let filter = "";
   const body = h("div", {});
-  const prog = h("span", { class: "progress" });
+  const ringWrap = h("div", {});
+  const countEl = h("div", { class: "hint search-count" }, "");
+
+  const head = periodHead({
+    ym: curYm, open: false,
+    onMonth: (ym) => { curYm = ym; load(); },
+  });
+
+  /** Searchable fields of a condition-monitoring motor. */
+  const motorFields = (mo: any): SearchField[] => [
+    { label: "Motor", text: mo.name || "", hidden: true },
+    ...(mo.idealTemp ? [{ label: "Ideal", text: `${mo.idealTemp} °C`, units: ["c"] }] : []),
+  ];
 
   async function load() {
     body.replaceChildren();
@@ -38,17 +52,35 @@ export async function renderConditionMon(_p: Record<string, string>, mount: HTML
     const tempMotors = [...masters.cmTempMotors].sort(
       (a, b) => (valMap.get(a.row) == null ? 0 : 1) - (valMap.get(b.row) == null ? 0 : 1)
     );
+    const q = filter.trim();
+    let shown = 0;
     for (const mo of tempMotors) {
+      const hits = matchRow(motorFields(mo), q);
+      if (hits === null) continue;
+      shown++;
       const val = valMap.get(mo.row);
       const inp = numInput({ value: val ?? null, placeholder: mo.idealTemp ? `ideal ${mo.idealTemp}` : "",
         onInput: debounce(async (v) => { await saveCmTemp(curYm, mo.row, v); recountTemp(); }, 350) });
       body.append(
         h("div", { class: `mrow ${val != null ? "filled" : ""}` },
-          h("div", { class: "mname" }, mo.name, mo.idealTemp ? h("small", {}, `Ideal ${mo.idealTemp}°C`) : null),
+          h("div", { class: "mname" },
+            q ? highlight(mo.name, q) : mo.name,
+            mo.idealTemp ? h("small", {}, `Ideal ${mo.idealTemp}°C`) : null,
+            hitChips(hits, q, { Ideal: ["c"] })),
           inp)
       );
     }
+    noteSearch(shown, masters.cmTempMotors.length, q);
     recountTemp();
+  }
+
+  /** Result count line shared by both tabs. */
+  function noteSearch(shown: number, total: number, q: string) {
+    countEl.textContent = q ? `${shown} of ${total} motors match “${q}”` : "";
+    if (shown === 0 && q) {
+      body.append(h("div", { class: "list-empty" },
+        h("div", { class: "big" }, "🔍"), h("div", {}, `Nothing matches “${q}”.`)));
+    }
   }
 
   async function renderVib() {
@@ -62,26 +94,35 @@ export async function renderConditionMon(_p: Record<string, string>, mount: HTML
     const vibMotors = [...masters.cmVibMotors].sort(
       (a, b) => (isEmpty(a.row) ? 0 : 1) - (isEmpty(b.row) ? 0 : 1)
     );
+    const q = filter.trim();
+    let shown = 0;
     for (const mo of vibMotors) {
-      const cur = map.get(mo.row) ?? {};
+      const hits = matchRow(motorFields(mo), q);
+      if (hits === null) continue;
+      shown++;
+      const cur: { vel?: number | null; acc?: number | null } = map.get(mo.row) ?? {};
       const velInp = numInput({ value: cur.vel ?? null, placeholder: "Vel",
         onInput: debounce(async (v) => { await saveCmVib(curYm, mo.row, { vel: v }); recountVib(); }, 350) });
       const accInp = numInput({ value: cur.acc ?? null, placeholder: "Acc",
         onInput: debounce(async (v) => { await saveCmVib(curYm, mo.row, { acc: v }); recountVib(); }, 350) });
       body.append(
         h("div", { class: `mrow ${cur.vel != null || cur.acc != null ? "filled" : ""}` },
-          h("div", { class: "mname" }, mo.name),
+          h("div", { class: "mname" }, q ? highlight(mo.name, q) : mo.name),
           h("div", { class: "twin", style: { display: "flex", gap: "6px" } }, velInp, accInp))
       );
     }
+    noteSearch(shown, masters.cmVibMotors.length, q);
     recountVib();
   }
 
-  async function recountTemp() { prog.textContent = `${await db.cmTemp.where("ym").equals(curYm).count()}/${masters.cmTempMotors.length} temps`; }
+  async function recountTemp() {
+    const n = await db.cmTemp.where("ym").equals(curYm).count();
+    ringWrap.replaceChildren(progressRing(n, masters.cmTempMotors.length, "left"));
+  }
   async function recountVib() {
     const rows = await db.cmVib.where("ym").equals(curYm).toArray();
     const s = new Set(rows.filter((r) => r.vel != null || r.acc != null).map((r) => r.motorRow));
-    prog.textContent = `${s.size}/${masters.cmVibMotors.length} vib`;
+    ringWrap.replaceChildren(progressRing(s.size, masters.cmVibMotors.length, "left"));
   }
 
   // Copy helpers: map Condition Monitoring motors to their TEC 12 / TEC 15
@@ -122,15 +163,26 @@ export async function renderConditionMon(_p: Record<string, string>, mount: HTML
     onPick: (v) => { tab = v as "temp" | "vib"; load(); },
   });
 
+  const search = h("input", {
+    type: "search", placeholder: "Search motor…", "aria-label": "Search motors",
+    onInput: (e: Event) => { filter = (e.target as HTMLInputElement).value; load(); },
+  });
+
+  head.right.append(ringWrap);
+
   mount.append(
     topbar("Condition Monitoring", "Electrical Motors", "/records"),
     screen(
-      toolbar(monthPicker(curYm, (v) => { curYm = v; load(); }), prog),
+      head.el,
       seg,
-      h("p", { class: "hint", style: { marginTop: "10px" } }, "Diff & normalised columns are auto-calculated in Excel — only enter raw values."),
+      h("div", { style: { height: "10px" } }),
+      h("div", { class: "searchbar", style: { marginBottom: "6px" } }, search),
+      countEl,
+      h("p", { class: "hint" }, "Diff & normalised columns are auto-calculated in Excel — only enter raw values."),
       body
     )
   );
+  bindHeadGestures(mount.querySelector<HTMLElement>(".screen")!, head);
   await load();
 }
 

@@ -13,8 +13,8 @@
 //     (a short pull; a long, deliberate pull still reaches the browser's own
 //     pull-to-refresh, so both gestures stay available)
 //   • pull UP while at the top → panel collapses again
-import { h, wheelPicker } from "../ui";
-import { MONTHS_FULL, ymParts } from "../util";
+import { h } from "../ui";
+import { openMonthWheel, monthName } from "./parts";
 
 export interface PeriodHead {
   /** The sticky element to put at the top of the screen. */
@@ -29,6 +29,8 @@ export interface PeriodHead {
   setOpen(open: boolean): void;
   toggle(): void;
   isOpen(): boolean;
+  /** True just after opening — guards against the opening tap closing it again. */
+  justOpened(): boolean;
   /** Re-read `ym` into the month chip's label. */
   syncMonth(ym: string): void;
 }
@@ -43,7 +45,7 @@ export function periodHead(opts: {
   open?: boolean;
 }): PeriodHead {
   const monthLabel = h("span", { class: "ph-mlab" });
-  const monthChip = h("button", { class: "ph-month", type: "button", onClick: openMonthWheel }, monthLabel);
+  const monthChip = h("button", { class: "ph-month", type: "button", onClick: () => openWheel() }, monthLabel);
 
   const slot = h("div", { class: "ph-slot" });
   const right = h("div", { class: "ph-right" });
@@ -58,37 +60,36 @@ export function periodHead(opts: {
 
   function syncMonth(ym: string) {
     curYm = ym;
-    const { month } = ymParts(ym);
     // Title case reads better in a chip than the SHOUTED export spelling.
-    const name = MONTHS_FULL[month - 1];
-    monthLabel.textContent = `${name[0]}${name.slice(1).toLowerCase()} ${ym.slice(0, 4)}`;
+    monthLabel.textContent = `${monthName(Number(ym.slice(5, 7)))} ${ym.slice(0, 4)}`;
   }
 
-  function openMonthWheel() {
-    const maxYm = opts.maxYm ?? currentYm();
-    const year = Number(curYm.slice(0, 4));
-    const maxMonth = maxYm.slice(0, 4) === String(year) ? ymParts(maxYm).month : 12;
-    const options = MONTHS_FULL.slice(0, maxMonth).map((name, i) => ({
-      value: `${year}-${String(i + 1).padStart(2, "0")}`,
-      text: `${name[0]}${name.slice(1).toLowerCase()}`,
-    }));
-    wheelPicker({
-      columns: [{ label: String(year), options, value: curYm }],
-      onDone: ([ym]) => { syncMonth(ym); opts.onMonth(ym); },
-    });
+  // The one shared month/year wheel — same control on every screen.
+  function openWheel() {
+    openMonthWheel(curYm, (ym) => { syncMonth(ym); opts.onMonth(ym); }, opts.maxYm ?? currentYm());
   }
 
   function setOpen(next: boolean) {
     open = next;
     el.classList.toggle("ph-open", next);
+    // When the page is scrolled the panel can't push the content down (there is
+    // nothing above it on screen), so it floats over the readings instead. Taps
+    // outside then dismiss it, like any overlay.
+    el.classList.toggle("ph-overlay", next && window.scrollY > 8);
+    if (next) openedAt = Date.now();
   }
+
+  // When the panel was opened, so a scroll/wheel event caused by the very tap
+  // that opened it can't immediately close it again.
+  let openedAt = 0;
+  const justOpened = () => Date.now() - openedAt < 400;
 
   syncMonth(curYm);
   setOpen(open);
 
   return {
     el, slot, right, panel,
-    setOpen, toggle: () => setOpen(!open), isOpen: () => open, syncMonth,
+    setOpen, toggle: () => setOpen(!open), isOpen: () => open, justOpened, syncMonth,
   };
 }
 
@@ -126,18 +127,25 @@ export function bindHeadGestures(view: HTMLElement, head: PeriodHead, extra?: {
   const onMove = (x: number, y: number) => {
     if (!tracking) return;
     const dx = x - sx, dy = y - sy;
-    // Pulling DOWN from the very top is the "show me the calendar" gesture.
-    if (atTop && dy > OPEN_PULL && Math.abs(dy) > Math.abs(dx) * 1.4) {
+    const vertical = Math.abs(dy) > Math.abs(dx) * 1.4;
+    // Pulling DOWN while the page is already at the top is the "show me the
+    // calendar" gesture. It has to keep working after the user has collapsed
+    // the panel — the whole point is that it's the way to get it back.
+    if (atTop && vertical && dy > OPEN_PULL) {
       if (!head.isOpen() && !opened) { head.setOpen(true); opened = true; }
       return;
     }
-    // Pushing UP while at the top tucks it away again.
-    if (atTop && dy < -30 && Math.abs(dy) > Math.abs(dx) * 1.4) {
+    // Pushing UP at the top tucks it away again.
+    if (atTop && vertical && dy < -30) {
       if (head.isOpen()) head.setOpen(false);
       return;
     }
-    // Any other real drag (i.e. the user is scrolling the content) collapses it.
-    if (!atTop && Math.hypot(dx, dy) > 24 && head.isOpen()) head.setOpen(false);
+    // Scrolling the content collapses an inline panel; an overlay panel is
+    // independent of the page scroll and stays until dismissed.
+    if (!atTop && Math.hypot(dx, dy) > 24 && head.isOpen()
+        && !head.el.classList.contains("ph-overlay")) {
+      head.setOpen(false);
+    }
   };
 
   const onEnd = (x: number, y: number) => {
@@ -164,16 +172,34 @@ export function bindHeadGestures(view: HTMLElement, head: PeriodHead, extra?: {
   view.addEventListener("pointermove", (e) => { if (e.pointerType !== "touch") onMove(e.clientX, e.clientY); });
   view.addEventListener("pointerup", (e) => { if (e.pointerType !== "touch") onEnd(e.clientX, e.clientY); });
 
-  // Scrolling away from the top always collapses; a wheel-up at the top opens.
-  const onScroll = () => { if (window.scrollY > 8 && head.isOpen()) head.setOpen(false); };
+  // Scrolling collapses the panel — but never the scroll event fired by the very
+  // tap that just opened it (that was the "opens then instantly closes" bug).
+  // While the panel floats as an overlay the page scroll is irrelevant to it.
+  const onScroll = () => {
+    if (head.justOpened() || head.el.classList.contains("ph-overlay")) return;
+    if (window.scrollY > 8 && head.isOpen()) head.setOpen(false);
+  };
   window.addEventListener("scroll", onScroll, { passive: true });
   const onWheel = (e: WheelEvent) => {
+    if (head.justOpened()) return;
     if (window.scrollY <= 2 && e.deltaY < -20) head.setOpen(true);
     else if (e.deltaY > 10 && head.isOpen()) head.setOpen(false);
   };
   view.addEventListener("wheel", onWheel, { passive: true });
 
-  const dispose = () => window.removeEventListener("scroll", onScroll);
+  // An open overlay panel closes when the user taps anywhere outside it.
+  const onDocDown = (e: Event) => {
+    if (!head.isOpen() || head.justOpened()) return;
+    const t = e.target as HTMLElement | null;
+    if (t?.closest(".periodhead")) return; // inside the header — its own handlers deal with it
+    head.setOpen(false);
+  };
+  document.addEventListener("pointerdown", onDocDown, true);
+
+  const dispose = () => {
+    window.removeEventListener("scroll", onScroll);
+    document.removeEventListener("pointerdown", onDocDown, true);
+  };
   new MutationObserver((_m, obs) => {
     if (!view.isConnected) { dispose(); obs.disconnect(); }
   }).observe(view.parentNode ?? document.body, { childList: true });

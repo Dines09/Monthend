@@ -1,77 +1,28 @@
 import { h, topbar, screen, toast } from "../ui";
 import { db, type OverhaulRow } from "../db";
 import { debounce, ddMmmYyyy } from "../util";
+import { matchRow, highlight, hitChips, type SearchField, type FieldHit } from "../search";
 
 /**
- * The searchable fields of an overhaul row, each with the label shown on a
- * match chip. Searching covers everything the user might remember about a motor
- * — its name, either bearing number, the rating, the overhaul date, the megger
- * value or the remark — not just the name.
+ * Everything the user might remember about a motor: its name, either bearing
+ * number, the rating, the overhaul date, the megger value or the remark.
+ * `units` on the rating is what makes "12 KW" search the rating alone instead
+ * of matching any bearing number that happens to contain 12.
  */
-const SEARCH_FIELDS: { key: keyof OverhaulRow; label: string; fmt?: (v: any) => string }[] = [
-  { key: "motor", label: "Motor" },
-  { key: "kw", label: "Rating", fmt: (v) => `${v} KW` },
-  { key: "ndeBearing", label: "NDE brg" },
-  { key: "deBearing", label: "DE brg" },
-  { key: "interval", label: "Interval" },
-  { key: "lastOverhaul", label: "Overhauled", fmt: (v) => ddMmmYyyy(String(v)) },
-  { key: "megger", label: "Megger", fmt: (v) => `${v} MΩ` },
-  { key: "remarks", label: "Remarks" },
-];
-
-/** A field whose text contains the query, with the display value to show. */
-interface FieldHit { label: string; text: string }
-
-/**
- * Which fields of `r` match `q`. Every whitespace-separated term must appear
- * somewhere in the row, so "6314 pump" narrows rather than widens; the hits
- * returned are the fields that matched the *last* meaningful term set, i.e.
- * any field containing any term.
- */
-function fieldHits(r: OverhaulRow, q: string): FieldHit[] | null {
-  const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  if (!terms.length) return [];
-  const fields = SEARCH_FIELDS.map((f) => {
-    const raw = r[f.key];
-    if (raw == null || raw === "") return null;
-    const text = f.fmt ? f.fmt(raw) : String(raw);
-    return { label: f.label, text, hay: `${text} ${raw}`.toLowerCase() };
-  }).filter(Boolean) as { label: string; text: string; hay: string }[];
-
-  // Each term has to be found somewhere in the row for it to qualify.
-  if (!terms.every((t) => fields.some((f) => f.hay.includes(t)))) return null;
-  // Report the fields that actually carried a term, so the user sees *why* the
-  // row matched — that's the part that was missing before.
-  return fields
-    .filter((f) => terms.some((t) => f.hay.includes(t)))
-    .map(({ label, text }) => ({ label, text }));
+function overhaulFields(r: OverhaulRow): SearchField[] {
+  const f: SearchField[] = [{ label: "Motor", text: r.motor || "", hidden: true }];
+  if (r.kw != null) f.push({ label: "Rating", text: `${r.kw} KW`, units: ["kw"] });
+  if (r.ndeBearing) f.push({ label: "NDE brg", text: String(r.ndeBearing) });
+  if (r.deBearing) f.push({ label: "DE brg", text: String(r.deBearing) });
+  if (r.interval) f.push({ label: "Interval", text: String(r.interval) });
+  if (r.lastOverhaul) f.push({ label: "Overhauled", text: ddMmmYyyy(String(r.lastOverhaul)) });
+  if (r.megger != null) f.push({ label: "Megger", text: `${r.megger} MΩ` });
+  if (r.remarks) f.push({ label: "Remarks", text: String(r.remarks) });
+  return f;
 }
 
-/** Render `text` with every occurrence of any term wrapped in a <mark>. */
-function highlight(text: string, q: string): HTMLElement {
-  const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const wrap = h("span", {});
-  if (!terms.length) { wrap.textContent = text; return wrap; }
-  const lower = text.toLowerCase();
-  // Walk the string, at each position taking the longest term that matches.
-  let i = 0, plain = "";
-  const flush = () => { if (plain) { wrap.append(document.createTextNode(plain)); plain = ""; } };
-  while (i < text.length) {
-    const hit = terms
-      .filter((t) => lower.startsWith(t, i))
-      .sort((a, b) => b.length - a.length)[0];
-    if (hit) {
-      flush();
-      wrap.append(h("mark", { class: "hl" }, text.slice(i, i + hit.length)));
-      i += hit.length;
-    } else {
-      plain += text[i];
-      i++;
-    }
-  }
-  flush();
-  return wrap;
-}
+/** Units per chip label, so highlighting stays inside the qualified field. */
+const OVERHAUL_UNITS: Record<string, string[]> = { Rating: ["kw"] };
 
 export async function renderOverhaul(_p: Record<string, string>, mount: HTMLElement) {
   let filter = "";
@@ -84,7 +35,7 @@ export async function renderOverhaul(_p: Record<string, string>, mount: HTMLElem
     const q = filter.trim();
     let shown = 0;
     for (const r of rows) {
-      const hits = q ? fieldHits(r, q) : [];
+      const hits = matchRow(overhaulFields(r), q);
       if (hits === null) continue; // row doesn't satisfy every term
       shown++;
       listEl.append(rowCard(r, q, hits));
@@ -107,12 +58,7 @@ export async function renderOverhaul(_p: Record<string, string>, mount: HTMLElem
     // While searching, the fields that actually matched are surfaced as chips
     // with the term highlighted — so the user can see at a glance why this
     // motor came up (a bearing number, a date, a rating…).
-    const hitRow = hits.length
-      ? h("div", { class: "hitrow" },
-          ...hits.map((hit) => h("span", { class: "hitchip" },
-            h("span", { class: "hc-lab" }, hit.label),
-            highlight(hit.text, q))))
-      : null;
+    const hitRow = hitChips(hits, q, OVERHAUL_UNITS);
 
     return h(
       "div",

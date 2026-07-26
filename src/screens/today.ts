@@ -2,11 +2,26 @@ import { h, topbar, screen, navigate } from "../ui";
 import { db } from "../db";
 import { isSaturday, isoDate, ym, saturdaysInMonth, ymParts, parseIso, MONTHS_SHORT, ddMmmYyyy } from "../util";
 import { currentFireSession } from "../fireSchedule";
+import { bankComplete } from "./battery";
 
 // Today only covers what is actually due today: the daily ICCP reading and the
 // Saturday safety routine. The monthly records live under Records, and the
 // month-end download under Export — neither belongs on this screen.
 type Mode = "daily" | "sat";
+
+// The readings a day needs before it counts as done. Mirrors the ICCP screen's
+// own rule: shaft potential is only required when the ship is under way (at
+// Port/Anchor the shaft isn't turning, so it's fixed at 0).
+const ICCP_READINGS = ["draft", "seaTemp", "amp", "volt", "cell1", "cell2"] as const;
+const ICCP_STATIONARY = new Set(["Port", "Anchor"]);
+
+/** True when every reading for the day has been entered. */
+function iccpComplete(r: any): boolean {
+  if (!r) return false;
+  const keys: string[] = [...ICCP_READINGS];
+  if (!ICCP_STATIONARY.has(r.area ?? "Sea")) keys.push("shaftMv");
+  return keys.every((k) => typeof r[k] === "number");
+}
 
 function cardLink(icon: string, title: string, desc: string, route: string, right?: HTMLElement): HTMLElement {
   return h(
@@ -35,10 +50,10 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
 
   // ---- gather quick status for the tile badges ----
   const iccpToday = await db.iccpDaily.get(todayIso);
-  // Only a real reading counts as "entered" — `area` is auto-filled the moment
-  // the screen is opened, so testing it would mark untouched days as done.
-  const iccpDone = !!iccpToday &&
-    (["draft", "seaTemp", "amp", "volt", "cell1", "cell2"] as const).some((k) => iccpToday[k] != null);
+  // A day is "entered" only when EVERY reading is in — a part-filled day is
+  // still pending work. `area` is auto-filled on opening the screen, so it must
+  // not count towards this at all.
+  const iccpDone = iccpComplete(iccpToday);
 
   const { year, month } = ymParts(curYm);
   const sats = saturdaysInMonth(year, month);
@@ -46,7 +61,9 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
   const pastSats = sats.filter((s) => s <= todayIso);
   const missed = pastSats.filter((s) => !battDates.has(s));
   const nextSat = sats.find((s) => s > todayIso);
-  const batTodayCount = sat ? await db.battery.where("date").equals(todayIso).count() : 0;
+  const batTodayCount = sat
+    ? (await db.battery.where("date").equals(todayIso).toArray()).filter(bankComplete).length
+    : 0;
 
   // Fire-detector roster: which detectors are scheduled for the upcoming (or
   // today's) Saturday, and how many are already tested this quarter.
@@ -128,46 +145,43 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
   const daysSoFar = Math.min(dim, today.getDate());
   const iccpRows = await db.iccpDaily
     .where("date").between(`${curYm}-00`, `${curYm}-99`).toArray();
-  // "Entered" means the user has actually put a reading in — matching the rule
-  // the ICCP card uses, so the two never disagree. The auto-filled area / MGPS
-  // fields don't count, otherwise merely opening a day would mark it done.
-  const READINGS = ["draft", "seaTemp", "amp", "volt", "cell1", "cell2"] as const;
-  const iccpEntered = iccpRows.filter((r) => READINGS.some((k) => r[k] != null)).length;
+  // Fully-entered days only; anything part-filled counts as still pending.
+  const iccpEntered = iccpRows.filter(iccpComplete).length;
   const iccpPending = Math.max(0, daysSoFar - iccpEntered);
 
+  // Only fully-entered banks count — a bank with one cell filled is still due.
   const battBySat = new Map<string, number>();
   for (const e of await db.battery.toArray()) {
-    if (!e.date.startsWith(curYm)) continue;
+    if (!e.date.startsWith(curYm) || !bankComplete(e)) continue;
     battBySat.set(e.date, (battBySat.get(e.date) ?? 0) + 1);
   }
   const battDone = pastSats.filter((s) => (battBySat.get(s) ?? 0) >= 5).length;
   const battPending = Math.max(0, pastSats.length - battDone);
 
   /**
-   * One stat card. `tone` colours the number: green when nothing is pending,
-   * amber when something is, plain otherwise.
+   * One small stat slip. `tone` colours the number: green when nothing is
+   * outstanding, amber when something is, plain otherwise.
    */
-  function stat(value: string | number, label: string, sub: string, tone: "good" | "warn" | "plain"): HTMLElement {
-    return h("div", { class: `statcard tone-${tone}` },
-      h("div", { class: "sc-val" }, String(value)),
-      h("div", { class: "sc-lab" }, label),
-      h("div", { class: "sc-sub" }, sub));
+  function stat(value: string | number, label: string, tone: "good" | "warn" | "plain"): HTMLElement {
+    return h("div", { class: `statslip tone-${tone}` },
+      h("span", { class: "sc-val" }, String(value)),
+      h("span", { class: "sc-lab" }, label));
   }
 
   function statsFor(mode: Mode): HTMLElement {
-    const monthName = MONTHS_SHORT[month - 1].toUpperCase();
+    const mon = MONTHS_SHORT[month - 1].toUpperCase();
     if (mode === "daily") {
       return h("div", { class: "statrow" },
-        stat(iccpEntered, "Days entered", `of ${daysSoFar} in ${monthName}`, "plain"),
-        stat(iccpPending, "Pending", iccpPending === 0 ? "all caught up" : "days to fill",
+        stat(`${iccpEntered}/${daysSoFar}`, `days done in ${mon}`, iccpPending === 0 ? "good" : "plain"),
+        stat(iccpPending, iccpPending === 1 ? "day pending" : "days pending",
           iccpPending === 0 ? "good" : "warn"));
     }
+    const fireLeft = Math.max(0, fireUpcomingDets.length - fireDoneUpcoming);
     return h("div", { class: "statrow" },
-      stat(`${battDone}/${pastSats.length}`, "Battery", `Saturdays in ${monthName}`,
-        battPending === 0 ? "good" : "plain"),
-      stat(`${fireDoneUpcoming}/${fireUpcomingDets.length}`, "Fire test",
-        fireSession.plan.label.split("-")[0].slice(0, 3) + " round",
-        fireUpcomingDets.length > 0 && fireDoneUpcoming >= fireUpcomingDets.length ? "good" : "plain"));
+      stat(`${battDone}/${pastSats.length}`, `battery Sats in ${mon}`, battPending === 0 ? "good" : "plain"),
+      stat(`${fireDoneUpcoming}/${fireUpcomingDets.length}`, "detectors tested",
+        fireUpcomingDets.length > 0 && fireLeft === 0 ? "good" : "plain"),
+      ...(fireLeft > 0 ? [stat(fireLeft, "left on the round", "warn")] : []));
   }
 
   function setMode(mode: Mode) {

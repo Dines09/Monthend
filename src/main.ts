@@ -15,6 +15,7 @@ import { renderBusbar } from "./screens/busbar";
 import { renderFreon } from "./screens/freon";
 import { renderConditionMon } from "./screens/conditionmon";
 import { renderOverhaul } from "./screens/overhaul";
+import { renderUniversalSearch } from "./screens/universal";
 
 const app = document.getElementById("app")!;
 
@@ -43,6 +44,7 @@ route("/", renderToday);
 route("/records", renderRecords);
 route("/export", renderExport);
 route("/settings", renderSettings);
+route("/search", renderUniversalSearch);
 route("/rec/iccp", renderIccp);
 route("/rec/iccp-monthly/:ym", renderIccpMonthly);
 route("/rec/battery", renderBattery);

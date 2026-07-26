@@ -62,9 +62,12 @@ export async function renderBattery(_p: Record<string, string>, mount: HTMLEleme
   async function buildSatPanel() {
     const { year, month } = ymParts(curYm);
     const sats = saturdaysInMonth(year, month);
+    // A bank only counts once EVERY cell of it has a reading — a bank with one
+    // cell filled is still outstanding work, so it must not earn a tick.
     const counts = new Map<string, number>();
     for (const e of await db.battery.toArray()) {
-      if (e.date.startsWith(curYm)) counts.set(e.date, (counts.get(e.date) ?? 0) + 1);
+      if (!e.date.startsWith(curYm) || !bankComplete(e)) continue;
+      counts.set(e.date, (counts.get(e.date) ?? 0) + 1);
     }
     head.panel.replaceChildren(
       h("div", { class: "satgrid" },
@@ -83,10 +86,11 @@ export async function renderBattery(_p: Record<string, string>, mount: HTMLEleme
         })));
   }
 
-  /** Ring over the banks completed on the selected Saturday. */
+  /** Ring over the banks fully completed on the selected Saturday. */
   async function refreshRing() {
     if (!selDate) { ringWrap.replaceChildren(); return; }
-    const n = await db.battery.where("date").equals(selDate).count();
+    const rows = await db.battery.where("date").equals(selDate).toArray();
+    const n = rows.filter(bankComplete).length;
     ringWrap.replaceChildren(progressRing(Math.min(n, banks.length), banks.length, "left"));
   }
 
@@ -207,6 +211,21 @@ export async function renderBattery(_p: Record<string, string>, mount: HTMLEleme
   await buildSatPanel();
   await renderBank();
   await refreshRing();
+}
+
+/**
+ * A bank is finished only when every one of its cells has a voltage (and, on
+ * the CCA banks, a CCA figure too). One filled cell is not a completed bank —
+ * a tick there would tell the user a job is done when it isn't.
+ */
+export function bankComplete(e: BatteryEntry | undefined): boolean {
+  if (!e?.readings?.length) return false;
+  // The CCA banks (lifeboat / emergency gen) also need their CCA figure. Those
+  // are exactly the banks whose master entry declares measure === "CCA"; the
+  // 2 V banks store the literal "N/A" in `aux` instead.
+  const isCCA = masters.batteryBanks.find((b: any) => b.id === e.bankId)?.measure === "CCA";
+  return e.readings.every((r) =>
+    typeof r.volt === "number" && (!isCCA || typeof r.aux === "number"));
 }
 
 function shortBankName(b: any): string {

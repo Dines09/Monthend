@@ -1,6 +1,8 @@
-import { h, topbar, screen, toast, segmented, navigate } from "../ui";
+import { h, topbar, screen, toast, segmented, navigate, progressRing } from "../ui";
 import { db, getSetting, setSetting } from "../db";
 import { isoDate, parseIso, isSaturday, MONTHS_SHORT, ddMmmYyyy } from "../util";
+import { periodHead, bindHeadGestures } from "./periodhead";
+import { matchRow, highlight, type SearchField } from "../search";
 import {
   currentFireSession,
   sortByWalk,
@@ -112,15 +114,18 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
   // wraps in full — never truncated — and the tag carries a kind badge telling
   // the user which tester it needs.
   function detRow(d: ScheduledDet, tested: string | undefined, logDate: string, rightChip?: HTMLElement | null) {
+    // While searching, the tag and location carry the highlight so the user can
+    // see the matched text in place.
+    const q = query.trim();
     return h(
       "div",
       { class: `det ${tested ? "tested" : ""}`, onClick: () => toggle(d, logDate) },
       h("div", { class: "cb" }, tested ? "✓" : ""),
       h("div", { class: "info" },
         h("div", { class: "idrow" },
-          h("span", { class: "id" }, d.id || "—"),
+          h("span", { class: "id" }, q ? highlight(d.id || "—", q) : (d.id || "—")),
           h("span", { class: `kind k-${d.kind}` }, KIND_META[d.kind].short)),
-        h("div", { class: "loc" }, d.location || "—")),
+        h("div", { class: "loc" }, q ? highlight(d.location || "—", q) : (d.location || "—"))),
       h("div", { class: "detright" },
         rightChip ?? (tested ? h("span", { class: "chip done", style: { fontSize: "10px" } }, ddMon(tested)) : null))
     );
@@ -181,12 +186,19 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
   searchInput.addEventListener("input", () => { query = searchInput.value; paint(); });
   searchWrap.append(h("div", { class: "searchbar" }, searchInput), searchCount);
 
-  function matches(d: ScheduledDet): boolean {
-    const q = query.trim().toLowerCase();
-    if (!q) return true;
-    const hay = `${d.id} ${d.location} ${AREA_LABEL[d.area]} ${KIND_META[d.kind].label}`.toLowerCase();
-    // Every whitespace-separated term must appear, so "mcp galley" narrows down.
-    return q.split(/\s+/).every((term) => hay.includes(term));
+  /** The searchable fields of a detector, for the shared matcher. */
+  function detFields(d: ScheduledDet): SearchField[] {
+    return [
+      { label: "Tag", text: d.id || "", hidden: true },
+      { label: "Location", text: d.location || "" },
+      { label: "Area", text: AREA_LABEL[d.area] },
+      { label: "Type", text: KIND_META[d.kind].label },
+    ];
+  }
+
+  /** null when the detector doesn't match; otherwise the fields that did. */
+  function matches(d: ScheduledDet) {
+    return matchRow(detFields(d), query);
   }
 
   async function paint() {
@@ -231,35 +243,17 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
       );
     }
 
-    // ---- controls (session picker + record-date, session view only) ----
+    // ---- controls (record-date note, session view only) ----
+    // The session itself is picked from the header's Saturday panel, so all
+    // that's left here is the "logged on a different day" note.
     controlsEl.replaceChildren();
     if (view === "session") {
-      const picker = h("select", { class: "sat-select" });
-      for (const s of plan.saturdays) {
-        const cnt = (plan.bySat.get(s) ?? []).length;
-        const doneCnt = (plan.bySat.get(s) ?? []).filter((d) => tested.has(d.detKey)).length;
-        const mark = s === todayIso ? " · today" : "";
-        picker.append(h("option", { value: s, selected: s === sessionSat },
-          `${ddMon(s)}${mark} — ${doneCnt}/${cnt}${doneCnt >= cnt ? " ✓" : ""}`));
-      }
-      picker.value = sessionSat;
-      picker.addEventListener("change", () => {
-        sessionSat = picker.value; recordDate = sessionSat; paint(); syncSticky();
-      });
-
-      const dateInput = h("input", { type: "date", value: recordDate, class: "rec-date" }) as HTMLInputElement;
-      dateInput.addEventListener("change", () => { if (dateInput.value) { recordDate = dateInput.value; paint(); } });
       const custom = recordDate !== sessionSat;
-
       controlsEl.append(
-        h("div", { class: "fire-controls" },
-          h("label", { class: "fc-field" }, h("span", { class: "fc-lab" }, "Session"), picker),
-          h("label", { class: "fc-field" },
-            h("span", { class: "fc-lab" }, "Log tests on"), dateInput)),
         h("p", { class: "hint" },
           custom
-            ? `Custom date — taps below are recorded on ${ddMmmYyyy(recordDate)}, not the scheduled Saturday.`
-            : "Tap each detector as you test it. Did it on another day? Change “Log tests on”.")
+            ? `Logging on ${ddMmmYyyy(recordDate)} — tap the date chip above to change it back.`
+            : "Tap each detector as you test it. Tested on another day? Tap the date chip above.")
       );
     }
 
@@ -274,7 +268,7 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
         renderZoned(listEl, sessionDets, tested, () => recordDate, false);
       }
     } else {
-      const shown = allDets.filter(matches);
+      const shown = allDets.filter((d) => matches(d) !== null);
       searchCount.textContent = query.trim()
         ? `${shown.length} of ${allDets.length} detectors match “${query.trim()}”`
         : "";
@@ -287,8 +281,10 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
       }
     }
 
-    // Keep the pinned summary's count in step with what was just rendered.
+    // Keep the pinned summary, header ring and Saturday panel in step.
     void syncStickyCount();
+    void refreshRing();
+    if (head.isOpen()) void buildSatPanel();
   }
 
   const viewSeg = segmented({
@@ -298,6 +294,66 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
     onPick: (v) => { view = v as any; paint(); syncSticky(); },
     compact: true,
   });
+
+  // ---- uniform period header: month chip · Saturday chip · ring ----
+  // Same control as every other dated screen. The panel holds this quarter's
+  // Saturdays, so the session is picked by tapping a date rather than from a
+  // dropdown, and the month wheel jumps between quarters.
+  const head = periodHead({
+    ym: sessionSat.slice(0, 7),
+    open: false,
+    onMonth: (ym) => {
+      // Jump to the first scheduled Saturday in the chosen month, if any.
+      const inMonth = plan.saturdays.filter((s) => s.startsWith(ym));
+      if (inMonth.length) { sessionSat = inMonth[0]; recordDate = sessionSat; }
+      else toast("No detector round scheduled in that month", 1600);
+      head.syncMonth(sessionSat.slice(0, 7));
+      syncSatChip(); void buildSatPanel(); paint(); syncSticky();
+    },
+  });
+  const ringWrap = h("div", {});
+
+  const satLab = h("span", { class: "sat-chip-lab" }, "");
+  const satChip = h("button", { class: "satchip", type: "button", "aria-label": "Choose Saturday",
+    onClick: () => head.toggle() }, h("span", { class: "sat-chip-k" }, "SAT"), satLab);
+
+  function syncSatChip() {
+    satLab.textContent = ddMon(sessionSat);
+    satChip.classList.toggle("is-today", sessionSat === todayIso);
+  }
+
+  /** Panel: every Saturday of the quarter with its tested count. */
+  async function buildSatPanel() {
+    const tested = await testedThisQuarter();
+    head.panel.replaceChildren(
+      h("div", { class: "satgrid" },
+        ...plan.saturdays.map((s) => {
+          const dets = plan.bySat.get(s) ?? [];
+          const n = dets.filter((d) => tested.has(d.detKey)).length;
+          const done = dets.length > 0 && n >= dets.length;
+          return h("button", {
+            class: `satcard${s === sessionSat ? " sel" : ""}${done ? " done" : ""}${s > todayIso ? " future" : ""}`,
+            type: "button",
+            onClick: () => {
+              sessionSat = s; recordDate = s;
+              syncSatChip(); head.setOpen(false);
+              head.syncMonth(s.slice(0, 7));
+              void buildSatPanel(); paint(); syncSticky();
+            },
+          },
+            h("span", { class: "st-d" }, String(parseIso(s).getDate()).padStart(2, "0")),
+            h("span", { class: "st-m" }, MONTHS_SHORT[parseIso(s).getMonth()].toUpperCase()),
+            h("span", { class: "st-n" }, done ? "✓" : `${n}/${dets.length}`));
+        })));
+  }
+
+  /** Ring over the detectors tested in the selected session. */
+  async function refreshRing() {
+    const tested = await testedThisQuarter();
+    const dets = plan.bySat.get(sessionSat) ?? [];
+    const n = dets.filter((d) => tested.has(d.detKey)).length;
+    ringWrap.replaceChildren(progressRing(n, dets.length, "left"));
+  }
 
   // ---- sticky session bar ----
   // As the hero card scrolls out of view, the answer to "which Saturday am I on
@@ -335,9 +391,13 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
     }
   }
 
+  head.slot.append(satChip);
+  head.right.append(ringWrap);
+
   mount.append(
     topbar("Fire Detector Test", `${plan.label} ${plan.year}`, "/records"),
     screen(
+      head.el,
       stickyBar,
       viewSeg,
       h("div", { style: { height: "10px" } }),
@@ -348,6 +408,9 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
     )
   );
 
+  // Same gestures as every other dated screen.
+  bindHeadGestures(mount.querySelector<HTMLElement>(".screen")!, head);
+
   // The bar only appears once the hero card it summarises has scrolled away.
   const onScroll = () => stickyBar.classList.toggle("show", window.scrollY > 120);
   window.addEventListener("scroll", onScroll, { passive: true });
@@ -357,8 +420,11 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
     if (!screenEl.isConnected) { window.removeEventListener("scroll", onScroll); obs.disconnect(); }
   }).observe(mount, { childList: true });
 
+  syncSatChip();
   syncSticky();
+  await buildSatPanel();
   await paint();
+  await refreshRing();
   await syncStickyCount();
 }
 

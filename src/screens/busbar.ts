@@ -1,8 +1,8 @@
-import { h, topbar, screen, numInput, toast } from "../ui";
+import { h, topbar, screen, numInput, toast, progressRing } from "../ui";
 import { db } from "../db";
 import { masters } from "../seed";
 import { ym as ymOf, defaultReportYm, debounce } from "../util";
-import { monthPicker, toolbar, progressLabel } from "./parts";
+import { periodHead, bindHeadGestures } from "./periodhead";
 
 const PHASES: ("U" | "V" | "W")[] = ["U", "V", "W"];
 const PHASE_LABEL: Record<string, string> = { U: "Black U", V: "White V", W: "Red W" };
@@ -11,7 +11,11 @@ export async function renderBusbar(_p: Record<string, string>, mount: HTMLElemen
   let curYm = defaultReportYm();
 
   const body = h("div", {});
-  const prog = h("span", { class: "progress" });
+  const ringWrap = h("div", {});
+  const head = periodHead({
+    ym: curYm, open: false,
+    onMonth: (ym) => { curYm = ym; load(); },
+  });
 
   async function load() {
     body.replaceChildren();
@@ -64,22 +68,25 @@ export async function renderBusbar(_p: Record<string, string>, mount: HTMLElemen
           ...rowsEls)
       );
     }
-    prog.textContent = `${filled}/${total} phases`;
+    ringWrap.replaceChildren(progressRing(filled, total, "left"));
 
     async function recount() {
       const r = await db.busbar.where("ym").equals(curYm).count();
-      prog.textContent = `${r}/${total} phases`;
+      ringWrap.replaceChildren(progressRing(r, total, "left"));
     }
   }
+
+  head.right.append(ringWrap);
 
   mount.append(
     topbar("Busbar Temp", "TEC(A) 16", "/records"),
     screen(
-      toolbar(monthPicker(curYm, (v) => { curYm = v; load(); }), prog),
+      head.el,
       h("p", { class: "hint" }, "Placeholder shows last month's value. 8 panels × 3 phases + ECR temp."),
       body
     )
   );
+  bindHeadGestures(mount.querySelector<HTMLElement>(".screen")!, head);
   await load();
 }
 
