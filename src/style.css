@@ -330,20 +330,32 @@ label.field.big > input:focus { box-shadow: 0 0 0 3px rgba(56,182,255,.18); }
   font-size: 10.5px; font-weight: 800; letter-spacing: .7px; text-transform: uppercase;
   color: var(--muted); margin: 14px 0 7px;
 }
+/* One chip per tester to pick up — no counts: a single smoke tester covers
+   every smoke detector on the round. */
 .tester-row { display: flex; gap: 7px; flex-wrap: wrap; }
 .tester-chip {
-  display: flex; align-items: center; gap: 7px; flex: 1 1 auto; min-width: 128px;
-  padding: 8px 10px; border-radius: 10px;
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 9px 13px; border-radius: 999px;
   background: var(--bg2); border: 1px solid var(--line);
 }
-.tester-chip .tc-ic { font-size: 17px; line-height: 1; flex: 0 0 auto; }
-.tester-chip .tc-body { min-width: 0; }
-.tester-chip .tc-n { font-size: 12.5px; font-weight: 800; letter-spacing: .2px; }
-.tester-chip .tc-t { font-size: 10.5px; color: var(--muted); margin-top: 1px; }
+.tester-chip .tc-ic { font-size: 16px; line-height: 1; flex: 0 0 auto; }
+.tester-chip .tc-t { font-size: 13px; font-weight: 700; letter-spacing: .2px; }
 .tester-chip.k-smoke { border-color: rgba(56,182,255,.34); }
 .tester-chip.k-heat  { border-color: rgba(224,163,58,.38); }
 .tester-chip.k-flame { border-color: rgba(240,85,106,.34); }
 .tester-chip.k-mcp   { border-color: rgba(53,192,122,.36); }
+
+/* Warning for a round entering a space off the normal accommodation walk
+   (bosun store, BWTS room) — access has to be arranged beforehand. */
+.access-warn {
+  display: flex; align-items: flex-start; gap: 10px;
+  margin-top: 12px; padding: 11px 13px; border-radius: 12px;
+  background: rgba(224,163,58,.12); border: 1px solid rgba(224,163,58,.42);
+}
+.access-warn .aw-ic { font-size: 17px; line-height: 1.2; flex: 0 0 auto; }
+.access-warn .aw-body { min-width: 0; }
+.access-warn .aw-title { font-size: 13px; font-weight: 800; color: #e0a33a; }
+.access-warn .aw-sub { font-size: 11.5px; color: var(--muted); margin-top: 3px; line-height: 1.45; }
 
 /* Detector search (All view). */
 .det-search { width: 100%; }
@@ -669,28 +681,6 @@ label.field.invalid .lab { color: var(--bad); }
 .modetile.safety.active .mt-title { color: var(--safety); }
 .modetile.safety.hero { border-color: var(--safety); background: var(--safety-d); }
 .modetile.safety.hero .mt-ic, .modetile.safety.hero .mt-title { color: var(--safety); }
-
-/* Daily ICCP card, pinned at the bottom of Today just above the dock. It is
-   always on screen — the reading has to be taken every day — so it sits outside
-   the Saturday / Monthly tabs entirely. */
-.dailydock {
-  display: flex; align-items: center; gap: 13px;
-  margin-top: 18px; padding: 15px 16px;
-  border-radius: 16px; background: var(--card);
-  border: 1.5px solid var(--accent);
-  box-shadow: 0 0 0 3px rgba(56,182,255,.12);
-  transition: transform .12s, box-shadow .18s;
-  cursor: pointer;
-}
-.dailydock:active { transform: scale(.985); }
-.dailydock.done {
-  border-color: rgba(53,192,122,.5);
-  box-shadow: 0 0 0 3px rgba(53,192,122,.1);
-}
-.dailydock .dd-ic { font-size: 28px; line-height: 1; flex: 0 0 auto; }
-.dailydock .dd-body { flex: 1; min-width: 0; }
-.dailydock .dd-title { font-weight: 800; font-size: 16px; letter-spacing: .2px; }
-.dailydock .dd-sub { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
 
 /* ---- circular progress ring ---- */
 .ring { position: relative; width: 48px; height: 48px; flex: 0 0 auto; }

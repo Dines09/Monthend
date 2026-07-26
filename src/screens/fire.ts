@@ -7,9 +7,11 @@ import {
   kindCounts,
   AREA_LABEL,
   KIND_META,
+  SPECIAL_ACCESS,
   type QuarterPlan,
   type ScheduledDet,
   type DetKind,
+  type ShipArea,
 } from "../fireSchedule";
 
 /** "04 JUL" */
@@ -28,20 +30,45 @@ function areaHeading(d: ScheduledDet): string {
 }
 
 /**
- * "What do I need to carry" summary for a set of detectors: one chip per device
- * kind present, with the count and the tester it needs. This is what the user
- * checks before heading down for the round.
+ * "What do I need to carry" for a set of detectors — the list of testers, not a
+ * tally of detectors. One smoke tester covers every smoke detector on the round,
+ * so this only answers *which* of the four items to pick up.
  */
 function testerSummary(dets: ScheduledDet[]): HTMLElement {
-  const counts = kindCounts(dets);
-  const kinds = (Object.keys(KIND_META) as DetKind[]).filter((k) => counts[k] > 0);
+  const present = new Set(dets.map((d) => d.kind));
+  // Fixed order (smoke, heat, flame, MCP) so the chips don't reshuffle between
+  // Saturdays — the user learns one layout.
+  const kinds = (Object.keys(KIND_META) as DetKind[]).filter((k) => present.has(k));
   return h("div", { class: "tester-row" },
     ...kinds.map((k) =>
       h("div", { class: `tester-chip k-${k}` },
         h("span", { class: "tc-ic" }, KIND_META[k].icon),
-        h("div", { class: "tc-body" },
-          h("div", { class: "tc-n" }, `${counts[k]} × ${KIND_META[k].short}`),
-          h("div", { class: "tc-t" }, KIND_META[k].tester)))));
+        h("span", { class: "tc-t" }, KIND_META[k].tester))));
+}
+
+/** The special-access spaces (bosun store, BWTS room) present in a list. */
+function specialAreas(dets: ScheduledDet[]): ShipArea[] {
+  return SPECIAL_ACCESS.filter((a) => dets.some((d) => !d.battery && d.area === a));
+}
+
+/**
+ * Warning banner for a round that goes into a space outside the normal
+ * accommodation walk. These have to be opened up / arranged in advance, so the
+ * user needs to see it before the day rather than on arriving at a locked door.
+ */
+function accessWarning(dets: ScheduledDet[]): HTMLElement | null {
+  const areas = specialAreas(dets);
+  if (!areas.length) return null;
+  const names = areas.map((a) => AREA_LABEL[a]);
+  const list = names.length > 1
+    ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`
+    : names[0];
+  return h("div", { class: "access-warn" },
+    h("span", { class: "aw-ic" }, "⚠️"),
+    h("div", { class: "aw-body" },
+      h("div", { class: "aw-title" }, `${list} on this round`),
+      h("div", { class: "aw-sub" },
+        "Outside the accommodation walk — arrange access with the deck crew and carry the keys before you start.")));
 }
 
 export async function renderFire(_p: Record<string, string>, mount: HTMLElement) {
@@ -188,7 +215,9 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
           h("div", { class: "fh-zones" }, areas.join(" → ")),
           // What to carry down for this round.
           h("div", { class: "fh-carry" }, "Take with you"),
-          testerSummary(sessionDets))
+          testerSummary(sessionDets),
+          // Bosun store / BWTS need access arranged in advance.
+          accessWarning(sessionDets))
       );
     } else {
       summaryEl.append(
@@ -327,6 +356,7 @@ export async function maybeShowFireReminder() {
     h("div", { class: "rm-sub" }, `${remaining} of ${dets.length} detectors due · ${areas.length} areas`),
     h("div", { class: "rm-zones" }, areas.join(" → ")),
     testerSummary(dets),
+    accessWarning(dets),
     h("div", { class: "rm-actions" },
       h("button", { class: "btn secondary", onClick: () => close() }, "Later"),
       h("button", { class: "btn", onClick: () => { close(); navigate("/rec/fire"); } }, "Open test list"))

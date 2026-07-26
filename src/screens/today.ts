@@ -1,20 +1,12 @@
 import { h, topbar, screen, navigate } from "../ui";
 import { db } from "../db";
 import { isSaturday, isoDate, ym, saturdaysInMonth, ymParts, parseIso, MONTHS_SHORT, ddMmmYyyy } from "../util";
-import {
-  motorTempStatus, vibrationStatus, busbarStatus, freonStatus, cmStatus, type RecStatus,
-} from "../status";
 import { currentFireSession } from "../fireSchedule";
 
-// The daily ICCP reading is no longer a mode: it has its own permanent card
-// pinned at the bottom of the screen, because it has to be opened every day.
-type Mode = "sat" | "monthly";
-
-function statusChip(s: RecStatus): HTMLElement {
-  const cls = s.state === "done" ? "done" : s.state === "partial" ? "due" : "pending";
-  const txt = s.state === "done" ? "Done" : s.state === "partial" ? s.label : "Pending";
-  return h("span", { class: `chip ${cls}` }, txt);
-}
+// Today only covers what is actually due today: the daily ICCP reading and the
+// Saturday safety routine. The monthly records live under Records, and the
+// month-end download under Export — neither belongs on this screen.
+type Mode = "daily" | "sat";
 
 function cardLink(icon: string, title: string, desc: string, route: string, right?: HTMLElement): HTMLElement {
   return h(
@@ -35,10 +27,11 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
   const todayIso = isoDate(today);
   const curYm = ym(today);
   const sat = isSaturday(today);
-  // On a Saturday the safety routine leads; on any other day the monthly work is
-  // what's actually open, so that's what gets shown expanded.
-  const primary: Mode = sat ? "sat" : "monthly";
-  let active: Mode = primary;
+  // The daily ICCP reading is always the one shown first — it is taken every
+  // single day. On a Saturday the safety routine takes the larger hero tile
+  // (it is the bigger job that day), but ICCP is still the open section.
+  const primary: Mode = sat ? "sat" : "daily";
+  let active: Mode = "daily";
 
   // ---- gather quick status for the tile badges ----
   const iccpToday = await db.iccpDaily.get(todayIso);
@@ -72,37 +65,28 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
   const fireScheduledToday = sat && fireUpcoming === todayIso ? fireUpcomingDets.length : 0;
   const fireDoneToday = sat && fireUpcoming === todayIso ? fireDoneUpcoming : 0;
 
-  const monthlyDefs: [string, string, string, () => Promise<RecStatus>][] = [
-    ["🌡️", "Motor Temp", "/rec/motortemp", () => motorTempStatus(curYm)],
-    ["📳", "Motor Vibration", "/rec/vibration", () => vibrationStatus(curYm)],
-    ["⚡", "Busbar Temp", "/rec/busbar", () => busbarStatus(curYm)],
-    ["❄️", "Freon Consumption", "/rec/freon", () => freonStatus(curYm)],
-    ["📊", "Condition Monitoring", "/rec/conditionmon", () => cmStatus(curYm)],
-  ];
-  const monthlyStatuses = await Promise.all(monthlyDefs.map((d) => d[3]()));
-  const monthlyDone = monthlyStatuses.filter((s) => s.state === "done").length;
-
   // ---- tile descriptors ----
   const badge = (cls: string, txt: string) => h("span", { class: `chip ${cls}` }, txt);
   function tileInfo(mode: Mode): { ic: string; title: string; sub: string; badge: HTMLElement } {
-    if (mode === "sat") {
-      if (sat) {
-        const fireDone = fireScheduledToday === 0 || fireDoneToday >= fireScheduledToday;
-        const done = batTodayCount >= 5 && fireDone;
-        return { ic: "🛟", title: "Saturday", sub: "Safety routine · today",
-          badge: done ? badge("done", "✓") : badge("due", "Due") };
-      }
-      if (missed.length)
-        return { ic: "🛟", title: "Saturday", sub: `${missed.length} missed this month`,
-          badge: badge("bad", String(missed.length)) };
-      return { ic: "🛟", title: "Saturday",
-        sub: nextSat ? `Next: ${dayLabel(nextSat)}` : "All Saturdays done",
-        badge: badge("done", "✓") };
+    if (mode === "daily") {
+      return {
+        ic: "🌊", title: "ICCP / MGPS",
+        sub: iccpDone ? "Entered today" : "Daily reading due",
+        badge: iccpDone ? badge("done", "✓") : badge("due", "Due"),
+      };
     }
-    return {
-      ic: "📅", title: "Monthly", sub: `${MONTHS_SHORT[month - 1]} · ${monthlyDone}/5 files done`,
-      badge: monthlyDone >= 5 ? badge("done", "✓") : badge("due", `${5 - monthlyDone}`),
-    };
+    if (sat) {
+      const fireDone = fireScheduledToday === 0 || fireDoneToday >= fireScheduledToday;
+      const done = batTodayCount >= 5 && fireDone;
+      return { ic: "🛟", title: "Saturday", sub: "Safety routine · today",
+        badge: done ? badge("done", "✓") : badge("due", "Due") };
+    }
+    if (missed.length)
+      return { ic: "🛟", title: "Saturday", sub: `${missed.length} missed this month`,
+        badge: badge("bad", String(missed.length)) };
+    return { ic: "🛟", title: "Saturday",
+      sub: nextSat ? `Next: ${dayLabel(nextSat)}` : "All Saturdays done",
+      badge: badge("done", "✓") };
   }
 
   const tiles: Partial<Record<Mode, HTMLElement>> = {};
@@ -124,7 +108,7 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
   }
 
   // hero = the day's primary mode; the other one sits in the row below.
-  const order: Mode[] = ["sat", "monthly"];
+  const order: Mode[] = ["daily", "sat"];
   const secondary = order.filter((m) => m !== primary);
   const modebar = h(
     "div",
@@ -135,20 +119,6 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
 
   const listEl = h("div", {});
 
-  // The daily ICCP / MGPS reading lives in its own permanent card at the bottom
-  // of the screen — always visible, never behind a tab, because it's opened
-  // every single day regardless of which mode is selected above.
-  const dailyCard = h(
-    "div",
-    { class: `dailydock ${iccpDone ? "done" : ""}`, onClick: () => navigate("/rec/iccp") },
-    h("div", { class: "dd-ic" }, "🌊"),
-    h("div", { class: "dd-body" },
-      h("div", { class: "dd-title" }, "ICCP / MGPS Reading"),
-      h("div", { class: "dd-sub" },
-        iccpDone ? `${ddMmmYyyy(todayIso)} · entered` : `${ddMmmYyyy(todayIso)} · tap to enter today`)),
-    iccpDone ? h("span", { class: "chip done" }, "✓") : h("span", { class: "chip due" }, "Due")
-  );
-
   function setMode(mode: Mode) {
     if (mode === active) return;
     active = mode;
@@ -158,7 +128,13 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
 
   function renderList() {
     listEl.replaceChildren();
-    if (active === "sat") {
+    if (active === "daily") {
+      listEl.append(
+        cardLink("🌊", "ICCP / MGPS Reading",
+          `${ddMmmYyyy(todayIso)}${iccpDone ? " · entered" : " · tap to enter today"}`, "/rec/iccp",
+          iccpDone ? h("span", { class: "chip done" }, "✓") : h("span", { class: "chip due" }, "Due"))
+      );
+    } else {
       if (sat) {
         listEl.append(
           cardLink("🔋", "Battery Log",
@@ -187,25 +163,12 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
         listEl.append(cardLink("🚨", "Fire Detector Test",
           `Next: ${fireUpcomingDets.length} detectors on ${dayLabel(fireUpcoming)}`, "/rec/fire"));
       }
-    } else {
-      monthlyDefs.forEach(([ic, title, route], i) => {
-        listEl.append(cardLink(ic, title, monthlyStatuses[i].label, route, statusChip(monthlyStatuses[i])));
-      });
-      listEl.append(h("div", { class: "divider" }));
-      listEl.append(
-        h("div", { class: "card tap accent", onClick: () => navigate("/export") },
-          h("div", { class: "card-row" },
-            h("div", { class: "icon" }, "⬇️"),
-            h("div", { class: "body" }, h("div", { class: "title" }, "Export Month End"),
-              h("div", { class: "desc" }, "Download all Excel files for the month")),
-            h("div", { class: "chev" }, "›")))
-      );
     }
   }
 
   mount.append(
     topbar("Month End", `${await vesselName()} · ${ddMmmYyyy(todayIso)}${sat ? " · SATURDAY" : ""}`),
-    screen(modebar, h("div", { style: { height: "6px" } }), listEl, dailyCard)
+    screen(modebar, h("div", { style: { height: "6px" } }), listEl)
   );
   renderList();
 }

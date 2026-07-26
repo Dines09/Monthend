@@ -68,12 +68,20 @@ export function detKind(id: string, location = ""): DetKind {
 // way means one continuous walk instead of scrolling back and forth.
 export type ShipArea =
   | "er-floor" | "er-2nd" | "er-1st" | "er-casing" | "sgr"
-  | "upp" | "a" | "b" | "c" | "bridge" | "stairway" | "bosun" | "bwts" | "other";
+  | "upp" | "bosun" | "bwts" | "a" | "b" | "c" | "bridge" | "other";
 
+// The walk: up through the engine room, steering gear, then the upper deck.
+// Bosun store and the BWTS room are entered off the upper deck, so they are done
+// there before carrying on up through A, B, C and the bridge.
 export const AREA_ORDER: ShipArea[] = [
   "er-floor", "er-2nd", "er-1st", "er-casing", "sgr",
-  "upp", "a", "b", "c", "bridge", "stairway", "bosun", "bwts", "other",
+  "upp", "bosun", "bwts", "a", "b", "c", "bridge", "other",
 ];
+
+// Spaces that are not part of the ordinary accommodation round — they have to be
+// opened up / arranged with the deck crew, so the screen warns on the Saturdays
+// they come up.
+export const SPECIAL_ACCESS: ShipArea[] = ["bosun", "bwts"];
 
 export const AREA_LABEL: Record<ShipArea, string> = {
   "er-floor":  "E/R Floor",
@@ -82,13 +90,12 @@ export const AREA_LABEL: Record<ShipArea, string> = {
   "er-casing": "E/R Casing",
   sgr:         "Steering Gear Room",
   upp:         "Upper Deck",
+  bosun:       "Bosun Store",
+  bwts:        "BWTS Room",
   a:           "A Deck",
   b:           "B Deck",
   c:           "C Deck",
   bridge:      "Bridge",
-  stairway:    "Stairways",
-  bosun:       "Bosun Store",
-  bwts:        "BWTS Room",
   other:       "Other",
 };
 
@@ -115,7 +122,9 @@ export function detArea(location: string): ShipArea {
   }
 
   if (/S\s?\/?\s?G\s?\/?\s?R|STEERING GEAR|\bSDR\b/.test(t)) return "sgr";
-  if (/STAIRWAY|STAIR CASE/.test(t)) return "stairway";
+  // Stairways are not a place of their own: a stairway belongs to the deck it
+  // serves ("STAIRWAY A-DECK" is part of the A deck round), so the deck checks
+  // below decide it. Only a stairway with no deck named falls through to "other".
   if (/\bUPP\b|UPPER DECK/.test(t)) return "upp";
   if (/\bA DECK\b|\bA DK\b/.test(t)) return "a";
   if (/\bB DECK\b|\bB DK\b/.test(t)) return "b";
