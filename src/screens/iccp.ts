@@ -1,6 +1,6 @@
-import { h, topbar, screen, numInput, readingField, toast, segmented, progressRing, achievement, helpTip, longPress, wheelPicker, type ReadingSpec } from "../ui";
+import { h, topbar, screen, numInput, readingField, toast, segmented, progressRing, achievement, helpTip, longPress, wheelPicker, navigate, type ReadingSpec } from "../ui";
 import { db, type IccpDaily } from "../db";
-import { isoDate, defaultReportYm, ymParts, debounce, parseIso, saturdaysInMonth, slipringDefault, MONTHS_FULL } from "../util";
+import { isoDate, ymParts, debounce, parseIso, saturdaysInMonth, slipringDefault, MONTHS_FULL, DOW_SHORT } from "../util";
 
 const AREAS = ["Sea", "Port", "Anchor"];
 const SEA_CHESTS = ["P", "S", "P/S"];
@@ -81,7 +81,9 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
   const form = h("div", {});
   const ringWrap = h("div", {});
   const calWrap = h("div", { class: "cal" });
-  const monthlyBtn = h("button", { class: "btn ghost", style: { marginTop: "16px" }, onClick: () => openMonthly(curYm) }, "Monthly footer (observations, slipring, remark)");
+  const monthlyBtn = h("button", { class: "btn ghost", style: { marginTop: "16px" },
+    onClick: () => navigate(`/rec/iccp-monthly/${curYm}`) },
+    "Monthly footer (observations, slipring, remark)");
 
   // Keep the selected day inside the current month (clamp when the month changes).
   function rebuildDays() {
@@ -288,15 +290,21 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
     return Object.entries(patch).some(([k, v]) => (saved as any)[k] !== v);
   }
 
-  // ---- header: month chip + a compact day chip that toggles the calendar ----
-  // The calendar starts collapsed so the readings get the full scroll height; the
-  // day chip (the selected day number, top-right under the ring) expands it.
-  let calExpanded = false;
+  // ---- header: month chip + a circular day chip that toggles the calendar ----
+  // The calendar starts open. As soon as the user swipes/scrolls the readings it
+  // collapses into the circular day chip (weekday on top, date under it); tapping
+  // that circle expands the calendar again.
+  let calExpanded = true;
 
+  const dayDow = h("span", { class: "dc-dow" }, "");
   const dayNum = h("span", { class: "dc-n" }, "1");
-  const dayChip = h("button", { class: "daychip", type: "button", "aria-label": "Show calendar",
-    onClick: toggleCalendar }, dayNum, h("span", { class: "dc-cal" }, "📅"));
-  function syncDayLabel() { dayNum.textContent = String(Number(selDate.slice(-2))); }
+  const dayChip = h("button", { class: "daychip", type: "button", "aria-label": "Hide calendar",
+    onClick: toggleCalendar }, dayDow, dayNum);
+  function syncDayLabel() {
+    dayNum.textContent = String(Number(selDate.slice(-2)));
+    dayDow.textContent = DOW_SHORT[parseIso(selDate).getDay()];
+    dayChip.classList.toggle("is-today", selDate === todayIso);
+  }
 
   function setCalendar(open: boolean) {
     calExpanded = open;
@@ -304,6 +312,9 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
     dayChip.setAttribute("aria-label", open ? "Hide calendar" : "Show calendar");
   }
   function toggleCalendar() { setCalendar(!calExpanded); }
+  // Any scroll / swipe gesture on the screen tucks the calendar away so the
+  // readings get the full height back.
+  function collapseCalendar() { if (calExpanded) setCalendar(false); }
 
   const monthLabel = h("div", { class: "mnum" });
   const monthChip = h("button", { class: "monthchip", type: "button", onClick: openMonthWheel }, monthLabel);
@@ -427,7 +438,7 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
     topbar("ICCP / MGPS Daily", "Daily readings", "/records"),
     screen(
       dayhead,
-      h("div", { class: "swipehint" }, "‹ swipe an empty area to change day ›"),
+      h("div", { class: "swipehint" }, "‹ swipe to change day · scroll to tuck the calendar away ›"),
       form,
       monthlyBtn
     )
@@ -445,6 +456,12 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
     if (startsOnControl(t)) { tracking = false; return; }
     sx = x; sy = y; tracking = true;
   };
+  const onMove = (x: number, y: number) => {
+    if (!tracking) return;
+    // Any real drag — in any direction — tucks the calendar away immediately, so
+    // the user sees the readings as soon as they start moving.
+    if (Math.hypot(x - sx, y - sy) > 24) collapseCalendar();
+  };
   const onEnd = (x: number, y: number) => {
     if (!tracking) return;
     tracking = false;
@@ -456,23 +473,41 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
   view.addEventListener("touchstart", (e) => {
     const t = e.touches[0]; onStart(t.clientX, t.clientY, e.target);
   }, { passive: true });
+  view.addEventListener("touchmove", (e) => {
+    const t = e.touches[0]; onMove(t.clientX, t.clientY);
+  }, { passive: true });
   view.addEventListener("touchend", (e) => {
     const t = e.changedTouches[0]; onEnd(t.clientX, t.clientY);
   }, { passive: true });
   // Pointer fallback for desktop / mouse-drag testing.
   view.addEventListener("pointerdown", (e) => { if (e.pointerType !== "touch") onStart(e.clientX, e.clientY, e.target); });
+  view.addEventListener("pointermove", (e) => { if (e.pointerType !== "touch") onMove(e.clientX, e.clientY); });
   view.addEventListener("pointerup", (e) => { if (e.pointerType !== "touch") onEnd(e.clientX, e.clientY); });
+  // Scrolling the page (wheel, momentum scroll, keyboard) also collapses it.
+  const onScroll = () => { if (window.scrollY > 8) collapseCalendar(); };
+  window.addEventListener("scroll", onScroll, { passive: true });
+  view.addEventListener("wheel", collapseCalendar, { passive: true });
+  // The screen is rebuilt on every navigation, so drop the window listener when
+  // this view leaves the DOM.
+  new MutationObserver((_m, obs) => {
+    if (!view.isConnected) { window.removeEventListener("scroll", onScroll); obs.disconnect(); }
+  }).observe(mount, { childList: true });
 
   rebuildDays();
   syncDayLabel();
   syncMonthLabel();
+  setCalendar(true); // opens expanded; the first swipe/scroll tucks it away
   await buildCalendar();
   await loadDay();
 }
 
-async function openMonthly(curYm: string) {
-  const mount = document.getElementById("view")!;
-  mount.replaceChildren();
+/**
+ * ICCP monthly footer — the observations / slipring / remark block that goes at
+ * the bottom of the exported sheet. Routed at /rec/iccp-monthly/:ym so the back
+ * button and the browser history behave.
+ */
+export async function renderIccpMonthly(p: Record<string, string>, mount: HTMLElement) {
+  const curYm = p.ym || isoDate(new Date()).slice(0, 7);
   const { year, month } = ymParts(curYm);
   const weeks = Math.max(1, saturdaysInMonth(year, month).length);
   const rec = (await db.iccpMonthly.get(curYm)) ?? { ym: curYm };
@@ -505,21 +540,30 @@ async function openMonthly(curYm: string) {
     await db.iccpMonthly.put({ ...cur, ...patch, ym: curYm });
   }
 
+  // Each observation is a row of tappable level chips rather than a dropdown —
+  // one tap to set, and the whole month's answers are readable at a glance.
   const obsEls = OBS_ROWS.map(([key, label]) => {
-    const sel = h("select", { onChange: async (e: Event) => {
-      const o = { ...(await db.iccpMonthly.get(curYm))?.obs, [key]: (e.target as HTMLSelectElement).value || null };
-      await save({ obs: o });
-      await refreshRing(true);
-    } },
-      h("option", { value: "", selected: !obs[key] }, "—"),
-      ...LEVELS.map((l) => h("option", { value: l, selected: obs[key] === l }, l)));
-    return h("label", { class: "field" }, h("span", { class: "lab" }, label), sel);
+    const chips = LEVELS.map((lvl) => {
+      const btn = h("button", { type: "button", class: `lvl lvl-${lvl.toLowerCase()}${obs[key] === lvl ? " on" : ""}` }, lvl);
+      btn.addEventListener("click", async () => {
+        const cur = (await db.iccpMonthly.get(curYm))?.obs ?? {};
+        // Tapping the active chip clears it, so a mis-tap is easy to undo.
+        const next = cur[key] === lvl ? null : lvl;
+        await save({ obs: { ...cur, [key]: next } });
+        chips.forEach((c, i) => c.classList.toggle("on", next === LEVELS[i]));
+        await refreshRing(true);
+      });
+      return btn;
+    });
+    return h("div", { class: "obs-row" },
+      h("div", { class: "obs-lab" }, label),
+      h("div", { class: "lvlrow" }, ...chips));
   });
 
   // One slipring week per Saturday in the month; blank weeks fall back to a
   // stable 15–20 mV prefill (shown as placeholder, used on export).
   const slipEls = Array.from({ length: weeks }, (_, i) =>
-    h("label", { class: "field" }, h("span", { class: "lab" }, `Slipring week ${i + 1} (mV)`),
+    h("label", { class: "field" }, h("span", { class: "lab" }, `Week ${i + 1} (mV)`),
       numInput({ value: slip[i] ?? null, placeholder: String(slipringDefault(curYm, i)),
         onInput: debounce(async (nv) => {
           const cur = (await db.iccpMonthly.get(curYm))?.slipring ?? [];
@@ -535,14 +579,25 @@ async function openMonthly(curYm: string) {
   mount.append(
     topbar("ICCP Monthly Footer", curYm, "/rec/iccp"),
     screen(
-      toolbar(h("span", { class: "progress" }, "Observations"), ringWrap),
-      h("h2", { style: { marginLeft: 0 } }, "Observations"),
-      ...obsEls,
-      h("label", { class: "field" }, h("span", { class: "lab" }, "Strainer inspection note"), strainerInp),
-      h("h2", { style: { marginLeft: 0 } }, "Slipring checks"),
-      h("p", { class: "hint", style: { marginTop: "-4px" } }, `${weeks} week${weeks > 1 ? "s" : ""} this month. Blank weeks use a 15–20 mV default.`),
-      ...slipEls,
-      h("label", { class: "field" }, h("span", { class: "lab" }, "Remark"), remarkInp)
+      h("div", { class: "mf-head" },
+        h("div", { class: "mf-headtxt" },
+          h("div", { class: "mf-title" }, "Observations"),
+          h("div", { class: "hint" }, "Tap a level for each item. Tap again to clear.")),
+        ringWrap),
+      h("div", { class: "card group" }, ...obsEls),
+      h("div", { class: "card group" },
+        h("div", { class: "group-hdr" }, h("span", {}, "Strainer inspection")),
+        h("label", { class: "field" },
+          h("span", { class: "lab" }, "Inspection note"), strainerInp)),
+      h("div", { class: "card group" },
+        h("div", { class: "group-hdr" },
+          h("span", {}, "Slipring checks"),
+          h("span", { class: "group-note" }, `${weeks} week${weeks > 1 ? "s" : ""}`)),
+        h("p", { class: "hint", style: { margin: "0 0 10px" } }, "Blank weeks use a 15–20 mV default on export."),
+        h("div", { class: "grid2" }, ...slipEls)),
+      h("div", { class: "card group" },
+        h("div", { class: "group-hdr" }, h("span", {}, "Remark")),
+        h("label", { class: "field" }, remarkInp))
     )
   );
   await refreshRing(false);

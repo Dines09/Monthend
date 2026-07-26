@@ -3,9 +3,13 @@ import { db, getSetting, setSetting } from "../db";
 import { isoDate, parseIso, isSaturday, MONTHS_SHORT, ddMmmYyyy } from "../util";
 import {
   currentFireSession,
-  zoneLabels,
+  sortByWalk,
+  kindCounts,
+  AREA_LABEL,
+  KIND_META,
   type QuarterPlan,
   type ScheduledDet,
+  type DetKind,
 } from "../fireSchedule";
 
 /** "04 JUL" */
@@ -13,8 +17,31 @@ function ddMon(iso: string): string {
   const d = parseIso(iso);
   return `${String(d.getDate()).padStart(2, "0")} ${MONTHS_SHORT[d.getMonth()].toUpperCase()}`;
 }
-function zoneHeading(d: ScheduledDet): string {
-  return d.battery ? "Battery-operated" : `Zone ${d.zone}`;
+
+/**
+ * The list is grouped by the physical space you walk through, so the heading is
+ * the area (E/R Floor, A Deck, …). Battery-operated units are their own group
+ * because they're a separate sheet on the record.
+ */
+function areaHeading(d: ScheduledDet): string {
+  return d.battery ? "Battery-operated" : AREA_LABEL[d.area];
+}
+
+/**
+ * "What do I need to carry" summary for a set of detectors: one chip per device
+ * kind present, with the count and the tester it needs. This is what the user
+ * checks before heading down for the round.
+ */
+function testerSummary(dets: ScheduledDet[]): HTMLElement {
+  const counts = kindCounts(dets);
+  const kinds = (Object.keys(KIND_META) as DetKind[]).filter((k) => counts[k] > 0);
+  return h("div", { class: "tester-row" },
+    ...kinds.map((k) =>
+      h("div", { class: `tester-chip k-${k}` },
+        h("span", { class: "tc-ic" }, KIND_META[k].icon),
+        h("div", { class: "tc-body" },
+          h("div", { class: "tc-n" }, `${counts[k]} × ${KIND_META[k].short}`),
+          h("div", { class: "tc-t" }, KIND_META[k].tester)))));
 }
 
 export async function renderFire(_p: Record<string, string>, mount: HTMLElement) {
@@ -54,52 +81,100 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
     await paint();
   }
 
-  // A single detector row (checkbox + name + location, optional right-hand chip).
+  // A single detector row. The location is the actual address on board, so it
+  // wraps in full — never truncated — and the tag carries a kind badge telling
+  // the user which tester it needs.
   function detRow(d: ScheduledDet, tested: string | undefined, logDate: string, rightChip?: HTMLElement | null) {
     return h(
       "div",
       { class: `det ${tested ? "tested" : ""}`, onClick: () => toggle(d, logDate) },
       h("div", { class: "cb" }, tested ? "✓" : ""),
       h("div", { class: "info" },
-        h("div", { class: "id" }, d.id),
+        h("div", { class: "idrow" },
+          h("span", { class: "id" }, d.id || "—"),
+          h("span", { class: `kind k-${d.kind}` }, KIND_META[d.kind].short)),
         h("div", { class: "loc" }, d.location || "—")),
-      rightChip ?? (tested ? h("span", { class: "chip done", style: { fontSize: "10px" } }, ddMon(tested)) : null)
+      h("div", { class: "detright" },
+        rightChip ?? (tested ? h("span", { class: "chip done", style: { fontSize: "10px" } }, ddMon(tested)) : null))
     );
   }
 
-  // Render a zone-grouped detector list into `container`.
+  // Render an area-grouped detector list into `container`, in walk order. Each
+  // area heading carries the count and the testers needed for that space.
   function renderZoned(container: HTMLElement, dets: ScheduledDet[], tested: Map<string, string>, logDateFor: (d: ScheduledDet) => string, showSat: boolean) {
     container.replaceChildren();
     let curHead = "";
+    let group: ScheduledDet[] = [];
+    let headEl: HTMLElement | null = null;
+    // The counts for a heading are only known once the group is complete, so the
+    // heading element is created first and its chips filled in when it closes.
+    const closeGroup = () => {
+      if (!headEl || !group.length) return;
+      const counts = kindCounts(group);
+      const kinds = (Object.keys(KIND_META) as DetKind[]).filter((k) => counts[k] > 0);
+      headEl.append(
+        h("span", { class: "zh-count" }, String(group.length)),
+        h("span", { class: "zh-kinds" },
+          ...kinds.map((k) => h("span", { class: `kind k-${k}` }, `${counts[k]} ${KIND_META[k].short}`)))
+      );
+    };
     for (const d of dets) {
-      const head = zoneHeading(d);
+      const head = areaHeading(d);
       if (head !== curHead) {
+        closeGroup();
         curHead = head;
-        container.append(h("div", { class: "zone-hdr" }, head));
+        group = [];
+        headEl = h("div", { class: "zone-hdr" }, h("span", { class: "zh-name" }, head));
+        container.append(headEl);
       }
+      group.push(d);
       const right = showSat
         ? h("span", { class: `chip ${tested.has(d.detKey) ? "done" : "pending"}`, style: { fontSize: "10px" } },
             tested.has(d.detKey) ? `✓ ${ddMon(tested.get(d.detKey)!)}` : `→ ${ddMon(plan.satOfDet.get(d.detKey)!)}`)
         : undefined;
       container.append(detRow(d, tested.get(d.detKey), logDateFor(d), right));
     }
+    closeGroup();
   }
 
   // ---- persistent shells re-filled by paint() ----
   const listEl = h("div", {});
   const summaryEl = h("div", {});
   const controlsEl = h("div", {});
+  const searchWrap = h("div", {});
+
+  // Free-text filter for the "All" view: matches the tag, the location, or the
+  // area name, so "S 51", "51", "boiler" and "e/r floor" all find something.
+  let query = "";
+  const searchInput = h("input", {
+    type: "search", class: "det-search", placeholder: "Search name, number or location…",
+    "aria-label": "Search detectors",
+  }) as HTMLInputElement;
+  const searchCount = h("div", { class: "hint search-count" }, "");
+  searchInput.addEventListener("input", () => { query = searchInput.value; paint(); });
+  searchWrap.append(h("div", { class: "searchbar" }, searchInput), searchCount);
+
+  function matches(d: ScheduledDet): boolean {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    const hay = `${d.id} ${d.location} ${AREA_LABEL[d.area]} ${KIND_META[d.kind].label}`.toLowerCase();
+    // Every whitespace-separated term must appear, so "mcp galley" narrows down.
+    return q.split(/\s+/).every((term) => hay.includes(term));
+  }
 
   async function paint() {
     const tested = await testedThisQuarter();
     const sessionDets = plan.bySat.get(sessionSat) ?? [];
     const testedInSession = sessionDets.filter((d) => tested.has(d.detKey)).length;
     const qLabel = `${plan.label} ${plan.year}`;
+    // Whole quarter in walk order — the "All" view's source list.
+    const allDets = sortByWalk(plan.saturdays.flatMap((s) => plan.bySat.get(s) ?? []));
+    // Areas this session covers, in the order they'll be walked.
+    const areas = [...new Set(sessionDets.map(areaHeading))];
 
     // ---- summary card ----
     summaryEl.replaceChildren();
     if (view === "session") {
-      const zl = zoneLabels(sessionDets);
       const isToday = sessionSat === todayIso;
       summaryEl.append(
         h("div", { class: `fire-hero ${isToday ? "today" : ""}` },
@@ -109,8 +184,11 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
               `${testedInSession}/${sessionDets.length}`)),
           h("div", { class: "fh-date" }, ddMmmYyyy(sessionSat)),
           h("div", { class: "fh-sub" },
-            `${sessionDets.length} detectors · ${zl.length} zones`),
-          h("div", { class: "fh-zones" }, `Zones: ${zl.join(", ")}`))
+            `${sessionDets.length} detectors · ${areas.length} areas`),
+          h("div", { class: "fh-zones" }, areas.join(" → ")),
+          // What to carry down for this round.
+          h("div", { class: "fh-carry" }, "Take with you"),
+          testerSummary(sessionDets))
       );
     } else {
       summaryEl.append(
@@ -118,7 +196,9 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
           h("div", { class: "fh-top" },
             h("div", { class: "fh-kicker" }, `${qLabel} · FULL CYCLE`),
             h("span", { class: `chip ${tested.size >= plan.total ? "done" : "due"}` }, `${tested.size}/${plan.total}`)),
-          h("div", { class: "fh-sub" }, "Every detector is scheduled once across the quarter's Saturdays. Tap any to mark tested."))
+          h("div", { class: "fh-sub" }, "Every detector is scheduled once across the quarter's Saturdays. Tap any to mark tested."),
+          h("div", { class: "fh-carry" }, "Full cycle needs"),
+          testerSummary(allDets))
       );
     }
 
@@ -152,6 +232,9 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
       );
     }
 
+    // ---- search (All view only) ----
+    searchWrap.style.display = view === "all" ? "" : "none";
+
     // ---- list ----
     if (view === "session") {
       if (sessionDets.length === 0) {
@@ -160,9 +243,17 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
         renderZoned(listEl, sessionDets, tested, () => recordDate, false);
       }
     } else {
-      const all = plan.saturdays.flatMap((s) => plan.bySat.get(s) ?? []);
-      all.sort((a, b) => Number(a.battery) - Number(b.battery) || a.zone - b.zone || a.row - b.row);
-      renderZoned(listEl, all, tested, (d) => plan.satOfDet.get(d.detKey)!, true);
+      const shown = allDets.filter(matches);
+      searchCount.textContent = query.trim()
+        ? `${shown.length} of ${allDets.length} detectors match “${query.trim()}”`
+        : "";
+      if (shown.length === 0) {
+        listEl.replaceChildren(h("div", { class: "list-empty" },
+          h("div", { class: "big" }, "🔍"),
+          h("div", {}, `Nothing matches “${query.trim()}”.`)));
+      } else {
+        renderZoned(listEl, shown, tested, (d) => plan.satOfDet.get(d.detKey)!, true);
+      }
     }
   }
 
@@ -181,6 +272,7 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
       h("div", { style: { height: "10px" } }),
       summaryEl,
       controlsEl,
+      searchWrap,
       listEl
     )
   );
@@ -222,7 +314,7 @@ export async function maybeShowFireReminder() {
 
   await setSetting("fireReminderShown", todayIso);
 
-  const zl = zoneLabels(dets);
+  const areas = [...new Set(dets.map(areaHeading))];
   const close = () => {
     back.classList.remove("show");
     setTimeout(() => back.remove(), 240);
@@ -232,8 +324,9 @@ export async function maybeShowFireReminder() {
     { class: "reminder-card", onClick: (e: Event) => e.stopPropagation() },
     h("div", { class: "rm-ic" }, "🚨"),
     h("div", { class: "rm-title" }, "Fire detector test — today"),
-    h("div", { class: "rm-sub" }, `${remaining} of ${dets.length} detectors due · ${zl.length} zones`),
-    h("div", { class: "rm-zones" }, `Zones ${zl.join(", ")}`),
+    h("div", { class: "rm-sub" }, `${remaining} of ${dets.length} detectors due · ${areas.length} areas`),
+    h("div", { class: "rm-zones" }, areas.join(" → ")),
+    testerSummary(dets),
     h("div", { class: "rm-actions" },
       h("button", { class: "btn secondary", onClick: () => close() }, "Later"),
       h("button", { class: "btn", onClick: () => { close(); navigate("/rec/fire"); } }, "Open test list"))

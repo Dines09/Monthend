@@ -6,7 +6,9 @@ import {
 } from "../status";
 import { currentFireSession } from "../fireSchedule";
 
-type Mode = "daily" | "sat" | "monthly";
+// The daily ICCP reading is no longer a mode: it has its own permanent card
+// pinned at the bottom of the screen, because it has to be opened every day.
+type Mode = "sat" | "monthly";
 
 function statusChip(s: RecStatus): HTMLElement {
   const cls = s.state === "done" ? "done" : s.state === "partial" ? "due" : "pending";
@@ -33,7 +35,9 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
   const todayIso = isoDate(today);
   const curYm = ym(today);
   const sat = isSaturday(today);
-  const primary: Mode = sat ? "sat" : "daily";
+  // On a Saturday the safety routine leads; on any other day the monthly work is
+  // what's actually open, so that's what gets shown expanded.
+  const primary: Mode = sat ? "sat" : "monthly";
   let active: Mode = primary;
 
   // ---- gather quick status for the tile badges ----
@@ -81,12 +85,6 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
   // ---- tile descriptors ----
   const badge = (cls: string, txt: string) => h("span", { class: `chip ${cls}` }, txt);
   function tileInfo(mode: Mode): { ic: string; title: string; sub: string; badge: HTMLElement } {
-    if (mode === "daily")
-      return {
-        ic: "📋", title: "Daily",
-        sub: iccpDone ? "ICCP · entered today" : "ICCP reading due",
-        badge: iccpDone ? badge("done", "✓") : badge("due", "Due"),
-      };
     if (mode === "sat") {
       if (sat) {
         const fireDone = fireScheduledToday === 0 || fireDoneToday >= fireScheduledToday;
@@ -125,8 +123,8 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
     return el;
   }
 
-  // hero = the day's primary mode; the other two sit in the row below.
-  const order: Mode[] = ["daily", "sat", "monthly"];
+  // hero = the day's primary mode; the other one sits in the row below.
+  const order: Mode[] = ["sat", "monthly"];
   const secondary = order.filter((m) => m !== primary);
   const modebar = h(
     "div",
@@ -137,6 +135,20 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
 
   const listEl = h("div", {});
 
+  // The daily ICCP / MGPS reading lives in its own permanent card at the bottom
+  // of the screen — always visible, never behind a tab, because it's opened
+  // every single day regardless of which mode is selected above.
+  const dailyCard = h(
+    "div",
+    { class: `dailydock ${iccpDone ? "done" : ""}`, onClick: () => navigate("/rec/iccp") },
+    h("div", { class: "dd-ic" }, "🌊"),
+    h("div", { class: "dd-body" },
+      h("div", { class: "dd-title" }, "ICCP / MGPS Reading"),
+      h("div", { class: "dd-sub" },
+        iccpDone ? `${ddMmmYyyy(todayIso)} · entered` : `${ddMmmYyyy(todayIso)} · tap to enter today`)),
+    iccpDone ? h("span", { class: "chip done" }, "✓") : h("span", { class: "chip due" }, "Due")
+  );
+
   function setMode(mode: Mode) {
     if (mode === active) return;
     active = mode;
@@ -146,13 +158,7 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
 
   function renderList() {
     listEl.replaceChildren();
-    if (active === "daily") {
-      listEl.append(
-        cardLink("🌊", "ICCP / MGPS Reading",
-          ddMmmYyyy(todayIso) + (iccpDone ? " · entered" : " · tap to enter today"), "/rec/iccp",
-          iccpDone ? h("span", { class: "chip done" }, "✓") : h("span", { class: "chip due" }, "Due"))
-      );
-    } else if (active === "sat") {
+    if (active === "sat") {
       if (sat) {
         listEl.append(
           cardLink("🔋", "Battery Log",
@@ -199,7 +205,7 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
 
   mount.append(
     topbar("Month End", `${await vesselName()} · ${ddMmmYyyy(todayIso)}${sat ? " · SATURDAY" : ""}`),
-    screen(modebar, h("div", { style: { height: "6px" } }), listEl)
+    screen(modebar, h("div", { style: { height: "6px" } }), listEl, dailyCard)
   );
   renderList();
 }

@@ -283,17 +283,71 @@ label.field.big > input:focus { box-shadow: 0 0 0 3px rgba(56,182,255,.18); }
 .searchbar input { padding-left: 40px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%2393b3c7' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M21 21l-4.3-4.3'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: 13px center; }
 
 .det {
-  display: flex; align-items: center; gap: 10px; padding: 11px 12px;
+  display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px;
   border: 1px solid var(--line); border-radius: 12px; margin-bottom: 7px; background: var(--card);
 }
 .det.tested { border-color: rgba(53,192,122,.45); background: rgba(53,192,122,.07); }
-.det .cb { width: 26px; height: 26px; border-radius: 8px; border: 2px solid var(--muted); flex: 0 0 auto; display: flex; align-items: center; justify-content: center; font-size: 16px; color: var(--good); }
+.det .cb { width: 26px; height: 26px; border-radius: 8px; border: 2px solid var(--muted); flex: 0 0 auto; display: flex; align-items: center; justify-content: center; font-size: 16px; color: var(--good); margin-top: 1px; }
 .det.tested .cb { border-color: var(--good); background: rgba(53,192,122,.15); }
 .det .info { flex: 1; min-width: 0; }
+.det .idrow { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 .det .info .id { font-weight: 700; font-size: 14px; }
-.det .info .loc { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The location is the real address on board — always shown in full, wrapping
+   over as many lines as it needs. Never truncate it. */
+.det .info .loc {
+  color: var(--muted); font-size: 12.5px; line-height: 1.45; margin-top: 3px;
+  overflow-wrap: anywhere; white-space: normal;
+}
+.det .detright { flex: 0 0 auto; margin-top: 1px; }
 
-.zone-hdr { font-size: 12px; color: var(--accent); font-weight: 700; text-transform: uppercase; letter-spacing: .5px; margin: 14px 2px 8px; }
+/* Device-kind badge (SMOKE / HEAT / FLAME / MCP) — tells the user which tester
+   the unit needs, at a glance. */
+.kind {
+  display: inline-block; padding: 2px 6px; border-radius: 5px;
+  font-size: 9.5px; font-weight: 800; letter-spacing: .5px; line-height: 1.5;
+  border: 1px solid transparent; white-space: nowrap;
+}
+.kind.k-smoke { background: rgba(56,182,255,.14); color: #4bb8f0; border-color: rgba(56,182,255,.3); }
+.kind.k-heat  { background: rgba(224,163,58,.16); color: #e0a33a; border-color: rgba(224,163,58,.34); }
+.kind.k-flame { background: rgba(240,85,106,.14); color: var(--bad); border-color: rgba(240,85,106,.3); }
+.kind.k-mcp   { background: rgba(53,192,122,.14); color: var(--good); border-color: rgba(53,192,122,.32); }
+
+/* Area heading: the physical space, with its count and the testers it needs. */
+.zone-hdr {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 12px; color: var(--accent); font-weight: 700; text-transform: uppercase;
+  letter-spacing: .5px; margin: 18px 2px 8px;
+}
+.zone-hdr .zh-name { flex: 0 0 auto; }
+.zone-hdr .zh-count {
+  background: var(--accent); color: var(--btn-fg); border-radius: 999px;
+  padding: 1px 7px; font-size: 10px; font-weight: 800; letter-spacing: 0;
+}
+.zone-hdr .zh-kinds { display: inline-flex; gap: 4px; flex-wrap: wrap; margin-left: auto; }
+
+/* "Take with you" tester summary on the hero card. */
+.fh-carry {
+  font-size: 10.5px; font-weight: 800; letter-spacing: .7px; text-transform: uppercase;
+  color: var(--muted); margin: 14px 0 7px;
+}
+.tester-row { display: flex; gap: 7px; flex-wrap: wrap; }
+.tester-chip {
+  display: flex; align-items: center; gap: 7px; flex: 1 1 auto; min-width: 128px;
+  padding: 8px 10px; border-radius: 10px;
+  background: var(--bg2); border: 1px solid var(--line);
+}
+.tester-chip .tc-ic { font-size: 17px; line-height: 1; flex: 0 0 auto; }
+.tester-chip .tc-body { min-width: 0; }
+.tester-chip .tc-n { font-size: 12.5px; font-weight: 800; letter-spacing: .2px; }
+.tester-chip .tc-t { font-size: 10.5px; color: var(--muted); margin-top: 1px; }
+.tester-chip.k-smoke { border-color: rgba(56,182,255,.34); }
+.tester-chip.k-heat  { border-color: rgba(224,163,58,.38); }
+.tester-chip.k-flame { border-color: rgba(240,85,106,.34); }
+.tester-chip.k-mcp   { border-color: rgba(53,192,122,.36); }
+
+/* Detector search (All view). */
+.det-search { width: 100%; }
+.search-count { margin: 6px 2px 4px; }
 
 .toast {
   position: fixed; left: 50%; bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) + 16px);
@@ -378,19 +432,28 @@ select.dayselect {
 .monthchip::after { content: "▾"; color: var(--muted); font-size: 12px; }
 .monthchip:active { filter: brightness(.95); }
 
-/* Day chip: the selected day number that opens/closes the calendar. */
+/* Day chip: a circle holding the weekday over the date. This is what the
+   calendar collapses into — tapping it pops the calendar back open. */
 .daychip {
-  display: inline-flex; align-items: center; gap: 6px; width: auto;
-  background: var(--card2); border: 1px solid var(--line); color: var(--text);
-  border-radius: 999px; padding: 5px 12px 5px 14px; line-height: 1;
-  font-weight: 800; font-size: 15px;
+  display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
+  width: 58px; height: 58px; flex: 0 0 auto; padding: 0; gap: 1px;
+  background: var(--card2); border: 1.5px solid var(--line); color: var(--text);
+  border-radius: 50%; line-height: 1;
+  transition: transform .18s, background .2s, border-color .2s, box-shadow .2s;
 }
-.daychip .dc-n { letter-spacing: .2px; }
-.daychip .dc-cal { font-size: 13px; filter: grayscale(.15); }
-.daychip:active { transform: scale(.95); }
+.daychip .dc-dow {
+  font-size: 9.5px; font-weight: 800; letter-spacing: .6px; color: var(--muted);
+}
+.daychip .dc-n { font-size: 21px; font-weight: 800; letter-spacing: .2px; }
+.daychip:active { transform: scale(.93); }
+/* Today's date gets an accent ring so it reads as "you are here". */
+.daychip.is-today { border-color: var(--accent); }
+.daychip.is-today .dc-dow { color: var(--accent); }
 .dayhead.cal-open .daychip {
   background: var(--accent); border-color: var(--accent); color: var(--btn-fg);
+  box-shadow: 0 4px 14px rgba(56,182,255,.25);
 }
+.dayhead.cal-open .daychip .dc-dow { color: var(--btn-fg); opacity: .8; }
 
 /* Collapsible calendar wrapper: closed by default, opens with .cal-open. */
 .cal-collapse {
@@ -476,6 +539,32 @@ select.dayselect {
   text-align: center; font-size: 12px; color: var(--muted); font-weight: 600;
   margin: 0 0 12px; opacity: .8; user-select: none;
 }
+
+/* ---- ICCP monthly footer ---- */
+.mf-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin: 2px 0 14px;
+}
+.mf-headtxt { min-width: 0; }
+.mf-title { font-size: 19px; font-weight: 800; letter-spacing: .2px; }
+
+.obs-row { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.obs-row:last-child { border-bottom: none; padding-bottom: 2px; }
+.obs-lab { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+/* Level chips (Nil / Light / Medium / Heavy) — one tap to set, tap again to clear. */
+.lvlrow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.lvl {
+  width: 100%; padding: 10px 4px; border-radius: 10px; line-height: 1;
+  background: var(--bg2); border: 1.5px solid var(--line); color: var(--muted);
+  font-size: 13px; font-weight: 700;
+  transition: background .15s, border-color .15s, color .15s, transform .12s;
+}
+.lvl:active { transform: scale(.95); }
+.lvl.on { color: var(--btn-fg); border-color: transparent; }
+.lvl-nil.on    { background: var(--good); }
+.lvl-light.on  { background: var(--accent); }
+.lvl-medium.on { background: #e0a33a; }
+.lvl-heavy.on  { background: var(--bad); }
 
 /* ---- invalid / out-of-range reading field ---- */
 input.invalid {
@@ -580,6 +669,28 @@ label.field.invalid .lab { color: var(--bad); }
 .modetile.safety.active .mt-title { color: var(--safety); }
 .modetile.safety.hero { border-color: var(--safety); background: var(--safety-d); }
 .modetile.safety.hero .mt-ic, .modetile.safety.hero .mt-title { color: var(--safety); }
+
+/* Daily ICCP card, pinned at the bottom of Today just above the dock. It is
+   always on screen — the reading has to be taken every day — so it sits outside
+   the Saturday / Monthly tabs entirely. */
+.dailydock {
+  display: flex; align-items: center; gap: 13px;
+  margin-top: 18px; padding: 15px 16px;
+  border-radius: 16px; background: var(--card);
+  border: 1.5px solid var(--accent);
+  box-shadow: 0 0 0 3px rgba(56,182,255,.12);
+  transition: transform .12s, box-shadow .18s;
+  cursor: pointer;
+}
+.dailydock:active { transform: scale(.985); }
+.dailydock.done {
+  border-color: rgba(53,192,122,.5);
+  box-shadow: 0 0 0 3px rgba(53,192,122,.1);
+}
+.dailydock .dd-ic { font-size: 28px; line-height: 1; flex: 0 0 auto; }
+.dailydock .dd-body { flex: 1; min-width: 0; }
+.dailydock .dd-title { font-weight: 800; font-size: 16px; letter-spacing: .2px; }
+.dailydock .dd-sub { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
 
 /* ---- circular progress ring ---- */
 .ring { position: relative; width: 48px; height: 48px; flex: 0 0 auto; }
