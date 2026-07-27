@@ -23,13 +23,23 @@ export async function renderVibration(_p: Record<string, string>, mount: HTMLEle
   ];
 
   async function load() {
-    const rows = await db.motorVibration.where("ym").equals(curYm).toArray();
+    // Last month's readings ride along as grey placeholders, so the user can see
+    // what this motor read last time while entering the new figure.
+    const [rows, prevRows] = await Promise.all([
+      db.motorVibration.where("ym").equals(curYm).toArray(),
+      db.motorVibration.where("ym").equals(shiftYm(curYm, -1)).toArray(),
+    ]);
     const map = new Map<string, { vel?: number | null; acc?: number | null }>();
     for (const r of rows) map.set(`${r.motorRow}:${r.end}`, { vel: r.vel, acc: r.acc });
-    render(map);
+    const prevMap = new Map<string, { vel?: number | null; acc?: number | null }>();
+    for (const r of prevRows) prevMap.set(`${r.motorRow}:${r.end}`, { vel: r.vel, acc: r.acc });
+    render(map, prevMap);
   }
 
-  function render(map: Map<string, { vel?: number | null; acc?: number | null }>) {
+  function render(
+    map: Map<string, { vel?: number | null; acc?: number | null }>,
+    prevMap: Map<string, { vel?: number | null; acc?: number | null }>
+  ) {
     listEl.replaceChildren();
     const q = filter.trim();
     const filledMotors = new Set<number>();
@@ -43,9 +53,14 @@ export async function renderVibration(_p: Record<string, string>, mount: HTMLEle
       const ends: Node[] = [];
       for (const end of ["drive", "free"] as const) {
         const cur = map.get(`${mo.row}:${end}`) ?? {};
-        const velInp = numInput({ value: cur.vel ?? null, placeholder: "Vel",
+        const prev = prevMap.get(`${mo.row}:${end}`) ?? {};
+        // Grey hint = last month's value for this exact motor + end. Falls back
+        // to the field name when there is no history to show.
+        const velInp = numInput({ value: cur.vel ?? null,
+          placeholder: prev.vel != null ? String(prev.vel) : "Vel",
           onInput: debounce(async (v) => { await saveVib(curYm, mo.row, end, { vel: v }); recount(); }, 350) });
-        const accInp = numInput({ value: cur.acc ?? null, placeholder: "Acc",
+        const accInp = numInput({ value: cur.acc ?? null,
+          placeholder: prev.acc != null ? String(prev.acc) : "Acc",
           onInput: debounce(async (v) => { await saveVib(curYm, mo.row, end, { acc: v }); recount(); }, 350) });
         ends.push(
           h("div", { style: { display: "flex", alignItems: "center", gap: "8px", marginTop: "6px" } },
@@ -100,6 +115,11 @@ export async function renderVibration(_p: Record<string, string>, mount: HTMLEle
   );
   bindHeadGestures(mount.querySelector<HTMLElement>(".screen")!, head);
   await load();
+}
+
+function shiftYm(ymStr: string, delta: number): string {
+  const [y, m] = ymStr.split("-").map(Number);
+  return ymOf(new Date(y, m - 1 + delta, 1));
 }
 
 async function saveVib(ymStr: string, motorRow: number, end: "drive" | "free", patch: { vel?: number | null; acc?: number | null }) {

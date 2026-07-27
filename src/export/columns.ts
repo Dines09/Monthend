@@ -6,6 +6,21 @@ export const busbarMonthCol = (month: number) => 4 + month; // Jan(1)->5
 // Freon (TEC A 33): sheet "TEC(A) 33". Jan=D(4) ... Dec=O(15).
 export const freonMonthCol = (month: number) => 3 + month; // Jan->4
 
+// Which freon systems actually carry a figure on this vessel.
+//
+// Rows 13/14/15 — Cargo switch board A/C, Inert Gas Chilling Plant and Work Shop
+// AC — have no consumption to record, so their cells stay empty on every month's
+// column regardless of what is stored. Bridge AC (17) is conditional: shown only
+// when the user entered a value. The screen and the exporter both go through
+// `freonValueFor`, so what the sheet shows can't drift from what the user sees.
+export const FREON_BLANK_ROWS = new Set([13, 14, 15]);
+export const FREON_CONDITIONAL_ROWS = new Set([17]);
+
+export function freonValueFor(row: number, v: number | null | undefined): number | null {
+  if (FREON_BLANK_ROWS.has(row)) return null;
+  return v ?? null;
+}
+
 // Motor Temp (TEC A 12): sheet "MOTORS TEMP". Jan=E(5) ... Dec=P(16). ER temp row 9.
 export const motorTempMonthCol = (month: number) => 4 + month; // Jan->5
 

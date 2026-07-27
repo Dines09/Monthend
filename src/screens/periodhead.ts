@@ -31,6 +31,14 @@ export interface PeriodHead {
   isOpen(): boolean;
   /** True just after opening — guards against the opening tap closing it again. */
   justOpened(): boolean;
+  /**
+   * Close the panel as a deliberate user choice (tapping the chip, picking a
+   * day). Unlike a scroll-away close, this one stays closed when the page
+   * returns to the top.
+   */
+  closeByUser(): void;
+  /** True if the last close was the user's own doing rather than a scroll. */
+  userClosed(): boolean;
   /** Re-read `ym` into the month chip's label. */
   syncMonth(ym: string): void;
 }
@@ -84,12 +92,22 @@ export function periodHead(opts: {
   let openedAt = 0;
   const justOpened = () => Date.now() - openedAt < 400;
 
+  // Whether the panel is closed because the user closed it (sticky) rather than
+  // because the page scrolled away from it (restored on returning to the top).
+  let closedByUser = false;
+  const closeByUser = () => { closedByUser = true; setOpen(false); };
+
   syncMonth(curYm);
   setOpen(open);
 
   return {
     el, slot, right, panel,
-    setOpen, toggle: () => setOpen(!open), isOpen: () => open, justOpened, syncMonth,
+    setOpen: (next: boolean) => { if (next) closedByUser = false; setOpen(next); },
+    toggle: () => { if (open) closeByUser(); else { closedByUser = false; setOpen(true); } },
+    isOpen: () => open,
+    justOpened, syncMonth,
+    closeByUser,
+    userClosed: () => closedByUser,
   };
 }
 
@@ -135,11 +153,13 @@ export function bindHeadGestures(view: HTMLElement, head: PeriodHead, extra?: {
       if (!head.isOpen() && !opened) { head.setOpen(true); opened = true; }
       return;
     }
-    // Pushing UP at the top tucks it away again.
-    if (atTop && vertical && dy < -30) {
-      if (head.isOpen()) head.setOpen(false);
-      return;
-    }
+    // Pushing UP at the top used to tuck the panel away. It no longer does:
+    // an up-swipe at the top is how the user starts scrolling down the page,
+    // and closing on it meant the calendar vanished the moment they scrolled —
+    // then wouldn't come back, because the re-open pull was being eaten by the
+    // browser's own pull-to-refresh. Scrolling away closes it (onScroll below);
+    // returning to the top brings it back.
+    if (atTop && vertical && dy < 0) return;
     // Scrolling the content collapses an inline panel; an overlay panel is
     // independent of the page scroll and stays until dismissed.
     if (!atTop && Math.hypot(dx, dy) > 24 && head.isOpen()
@@ -172,37 +192,62 @@ export function bindHeadGestures(view: HTMLElement, head: PeriodHead, extra?: {
   view.addEventListener("pointermove", (e) => { if (e.pointerType !== "touch") onMove(e.clientX, e.clientY); });
   view.addEventListener("pointerup", (e) => { if (e.pointerType !== "touch") onEnd(e.clientX, e.clientY); });
 
-  // Scrolling collapses the panel — but never the scroll event fired by the very
-  // tap that just opened it (that was the "opens then instantly closes" bug).
-  // While the panel floats as an overlay the page scroll is irrelevant to it.
+  // Scrolling down collapses the panel; scrolling back to the very top restores
+  // it. That restore is what makes the calendar reliable: previously it closed
+  // on the way up and only a precise pull-down could bring it back, so a user who
+  // scrolled to the top just saw the page bounce with no calendar.
+  //
+  // `userClosed` keeps a deliberate dismissal (tapping the day chip, picking a
+  // day, tapping outside) sticky — returning to the top must not undo a choice
+  // the user made on purpose.
   const onScroll = () => {
     if (head.justOpened() || head.el.classList.contains("ph-overlay")) return;
-    if (window.scrollY > 8 && head.isOpen()) head.setOpen(false);
+    if (window.scrollY > 8) {
+      // Collapsing here is a scroll-away close, so it can be restored below.
+      if (head.isOpen()) collapseForScroll();
+    } else if (!head.isOpen() && !head.userClosed()) {
+      head.setOpen(true);
+    }
   };
+  // Close because the page scrolled, without marking it as the user's choice.
+  const collapseForScroll = () => head.setOpen(false);
   window.addEventListener("scroll", onScroll, { passive: true });
   const onWheel = (e: WheelEvent) => {
     if (head.justOpened()) return;
     if (window.scrollY <= 2 && e.deltaY < -20) head.setOpen(true);
-    else if (e.deltaY > 10 && head.isOpen()) head.setOpen(false);
+    else if (e.deltaY > 10 && head.isOpen()) collapseForScroll();
   };
   view.addEventListener("wheel", onWheel, { passive: true });
 
-  // An open overlay panel closes when the user taps anywhere outside it.
+  // An open overlay panel closes when the user taps anywhere outside it. That's
+  // a deliberate dismissal, so scrolling back to the top won't reopen it.
   const onDocDown = (e: Event) => {
     if (!head.isOpen() || head.justOpened()) return;
     const t = e.target as HTMLElement | null;
     if (t?.closest(".periodhead")) return; // inside the header — its own handlers deal with it
-    head.setOpen(false);
+    head.closeByUser();
   };
   document.addEventListener("pointerdown", onDocDown, true);
 
+  let disposed = false;
   const dispose = () => {
+    if (disposed) return;
+    disposed = true;
     window.removeEventListener("scroll", onScroll);
     document.removeEventListener("pointerdown", onDocDown, true);
   };
-  new MutationObserver((_m, obs) => {
-    if (!view.isConnected) { dispose(); obs.disconnect(); }
-  }).observe(view.parentNode ?? document.body, { childList: true });
+  // Screens are built detached and swapped into the router's mount, so this
+  // watches the document rather than the (temporary) parent the view was built
+  // in — observing that staging node would never see the real removal and the
+  // scroll listeners would leak on every navigation.
+  const obs = new MutationObserver(() => {
+    // `view` is legitimately detached between being built and being swapped in;
+    // only tear down once it has been in the document and then left it.
+    if (view.isConnected) attached = true;
+    else if (attached) { dispose(); obs.disconnect(); }
+  });
+  let attached = view.isConnected;
+  obs.observe(document.body, { childList: true, subtree: true });
 
   return dispose;
 }

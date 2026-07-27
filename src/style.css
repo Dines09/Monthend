@@ -15,7 +15,10 @@
   --btn-fg: #062031;
   --input-ph: #5f8299;
   --nav-h: 84px;
-  --top-h: 54px;
+  /* Kept deliberately tight: this bar plus the period header below it were
+     eating the screen before any readings showed. Everything sticky measures
+     off this, so the whole stack shrinks with it. */
+  --top-h: 44px;
   --dock-bg: rgba(18, 44, 64, .82);
   --dock-line: rgba(56, 182, 255, .18);
   --dock-pill: rgba(56, 182, 255, .16);
@@ -84,6 +87,25 @@ body {
   font-size: 16px;
   overscroll-behavior-y: contain;
 }
+
+/* ---- native-app feel: no text selection, no pinch zoom ----
+   A long press anywhere used to pop the browser's text-selection handles and a
+   two-finger gesture zoomed the page, which is what made this read as a web
+   page rather than an app. Selection stays on for the fields the user types in
+   (and for the search box), where the OS editing handles are the point. */
+html {
+  -webkit-user-select: none; user-select: none;
+  -webkit-touch-callout: none; /* no "Copy / Look Up" sheet on long press (iOS) */
+  touch-action: pan-x pan-y;   /* scrolling yes, pinch-zoom no */
+  -webkit-text-size-adjust: 100%; text-size-adjust: 100%;
+  /* No pull-to-refresh. A reload mid-entry is never what the user wanted, and
+     it was swallowing the pull-down that opens the calendar panel. */
+  overscroll-behavior-y: contain;
+}
+input, textarea, select, [contenteditable="true"] {
+  -webkit-user-select: text; user-select: text;
+  -webkit-touch-callout: default;
+}
 #app { min-height: 100vh; }
 
 /* ---- top bar ---- */
@@ -100,15 +122,16 @@ body {
      light on-bar colour rather than var(--text) (near-black in light mode). */
   color: var(--top-fg);
 }
-.topbar h1 { font-size: 18px; margin: 0; font-weight: 700; letter-spacing: .2px; flex: 1; color: var(--top-fg); }
-.topbar .sub { font-size: 12px; color: var(--top-fg-muted); font-weight: 400; }
+.topbar h1 { font-size: 16px; margin: 0; font-weight: 700; letter-spacing: .2px; flex: 1; min-width: 0; color: var(--top-fg); line-height: 1.15; }
+.topbar .sub { font-size: 11px; color: var(--top-fg-muted); font-weight: 400; line-height: 1.2; }
 .topbar button.back {
   background: rgba(255,255,255,.14); border: none; color: var(--top-fg);
-  width: 36px; height: 36px; border-radius: 10px; font-size: 20px; line-height: 1;
+  width: 32px; height: 32px; border-radius: 9px; font-size: 19px; line-height: 1;
+  flex: 0 0 auto;
 }
 .topbar button.themebtn {
   background: rgba(255,255,255,.14); border: none; color: var(--top-fg);
-  width: 38px; height: 38px; border-radius: 10px; font-size: 19px; line-height: 1;
+  width: 32px; height: 32px; border-radius: 9px; font-size: 16px; line-height: 1;
   flex: 0 0 auto; cursor: pointer;
 }
 :root[data-theme="light"] .topbar button.themebtn,
@@ -485,16 +508,16 @@ select.dayselect {
    record itself gets the screen height. */
 .periodhead {
   position: sticky; top: calc(var(--top-h) + env(safe-area-inset-top)); z-index: 10;
-  background: var(--bg); padding: 6px 0 8px; margin: -4px 0 6px;
+  background: var(--bg); padding: 4px 0 5px; margin: -4px 0 4px;
 }
 .ph-row { display: flex; align-items: center; gap: 8px; }
 /* The month chip only claims the width its label needs — it used to eat a whole
    row for a word and a year. */
 .ph-month {
   flex: 0 0 auto; width: auto;
-  display: inline-flex; align-items: center; gap: 6px;
+  display: inline-flex; align-items: center; gap: 5px;
   background: var(--bg2); border: 1px solid var(--line); color: var(--text);
-  border-radius: 999px; padding: 8px 12px; font-size: 13.5px; font-weight: 700;
+  border-radius: 999px; padding: 6px 10px; font-size: 12.5px; font-weight: 700;
   line-height: 1; white-space: nowrap;
 }
 .ph-month::after { content: "▾"; color: var(--muted); font-size: 11px; }
@@ -503,9 +526,10 @@ select.dayselect {
 .ph-slot { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
 .ph-right { flex: 0 0 auto; display: flex; align-items: center; }
 /* Ring shrinks a little here — it shares one line now, not its own column. */
-.ph-right .ring, .ph-right .ring-svg { width: 40px; height: 40px; }
-.ph-right .ring-num { font-size: 13px; }
-.ph-right .ring-tick { font-size: 19px; }
+.ph-right .ring, .ph-right .ring-svg { width: 34px; height: 34px; }
+.ph-right .ring-num { font-size: 11.5px; }
+.ph-right .ring-tick { font-size: 16px; }
+.ph-right .ring-lab { font-size: 7px; }
 
 .ph-collapse {
   display: grid; grid-template-rows: 0fr; overflow: hidden;
@@ -563,17 +587,19 @@ select.dayselect {
 
 /* Day chip: a circle holding the weekday over the date. This is what the
    calendar collapses into — tapping it pops the calendar back open. */
+/* The day chip sets the height of the whole header row, so it stays compact —
+   it used to be a 58px circle that pushed the readings well down the screen. */
 .daychip {
   display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
-  width: 58px; height: 58px; flex: 0 0 auto; padding: 0; gap: 1px;
+  width: 40px; height: 40px; flex: 0 0 auto; padding: 0; gap: 0;
   background: var(--card2); border: 1.5px solid var(--line); color: var(--text);
   border-radius: 50%; line-height: 1;
   transition: transform .18s, background .2s, border-color .2s, box-shadow .2s;
 }
 .daychip .dc-dow {
-  font-size: 9.5px; font-weight: 800; letter-spacing: .6px; color: var(--muted);
+  font-size: 7.5px; font-weight: 800; letter-spacing: .4px; color: var(--muted);
 }
-.daychip .dc-n { font-size: 21px; font-weight: 800; letter-spacing: .2px; }
+.daychip .dc-n { font-size: 16px; font-weight: 800; letter-spacing: .2px; }
 .daychip:active { transform: scale(.93); }
 /* Today's date gets an accent ring so it reads as "you are here". */
 .daychip.is-today { border-color: var(--accent); }
@@ -597,10 +623,10 @@ select.dayselect {
 
 /* ---- Battery: the Saturday chip + the panel of Saturdays ---- */
 .satchip {
-  display: inline-flex; align-items: center; gap: 7px; width: auto;
+  display: inline-flex; align-items: center; gap: 6px; width: auto;
   background: var(--card2); border: 1.5px solid var(--line); color: var(--text);
-  border-radius: 999px; padding: 8px 14px; line-height: 1;
-  font-size: 14px; font-weight: 800; letter-spacing: .2px;
+  border-radius: 999px; padding: 6px 11px; line-height: 1;
+  font-size: 12.5px; font-weight: 800; letter-spacing: .2px;
   transition: transform .16s, background .2s, border-color .2s;
 }
 .satchip .sat-chip-k {
@@ -639,10 +665,16 @@ select.dayselect {
 .satcard.sel .st-d { color: var(--accent); }
 
 /* ---- month calendar ---- */
+/* The calendar and its legend sit side by side: the grid takes the space it
+   needs and the legend runs down a narrow right-hand column. Stacked underneath
+   (as it used to be) the legend ate a whole row of vertical space and crowded
+   the grid on small screens. */
 .cal {
   background: var(--bg2); border: 1px solid var(--line);
-  border-radius: 16px; padding: 12px 12px 10px;
+  border-radius: 16px; padding: 10px 10px 8px;
+  display: flex; align-items: flex-start; gap: 10px;
 }
+.cal-main { flex: 1; min-width: 0; }
 .cal-dow, .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); }
 .cal-dow {
   gap: 2px; margin-bottom: 6px;
@@ -690,24 +722,26 @@ select.dayselect {
 }
 .cal-day.done .cd-tick { display: flex; }
 
-/* ---- legend under the calendar ---- */
+/* ---- legend: a compact column down the right of the calendar ---- */
 .cal-legend {
-  display: flex; flex-wrap: wrap; gap: 6px 14px; justify-content: center;
-  margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line);
+  flex: 0 0 auto; align-self: stretch;
+  display: flex; flex-direction: column; gap: 7px; justify-content: center;
+  padding-left: 9px; border-left: 1px solid var(--line);
 }
 .cal-legend .leg {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-size: 12px; font-weight: 600; color: var(--muted);
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10px; font-weight: 600; color: var(--muted);
+  line-height: 1; white-space: nowrap;
 }
 .cal-legend .leg-dot {
-  width: 14px; height: 14px; border-radius: 50%; flex: 0 0 auto;
+  width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto;
   display: inline-flex; align-items: center; justify-content: center;
 }
 .cal-legend .leg-dot.a-sea   { background: var(--cal-sea); }
 .cal-legend .leg-dot.a-port  { background: var(--cal-port); }
 .cal-legend .leg-dot.a-anchor{ background: var(--cal-anchor); }
 .cal-legend .leg-dot.leg-done {
-  background: var(--good); color: #fff; font-size: 9px; font-weight: 900;
+  background: var(--good); color: #fff; font-size: 6px; font-weight: 900;
 }
 
 .swipehint {
@@ -984,6 +1018,48 @@ label.field.invalid .lab { color: var(--bad); }
 .done-banner .db-tick {
   width: 28px; height: 28px; border-radius: 50%; background: var(--good); color: #fff;
   display: flex; align-items: center; justify-content: center; font-size: 17px; font-weight: 900; flex: 0 0 auto;
+}
+
+/* Freon systems with no reading on this vessel: a locked dash where the input
+   would be, so it's clear the blank is intentional rather than unfilled. */
+.mrow.is-blank { opacity: .6; }
+.freon-blank {
+  width: 92px; flex: 0 0 auto; text-align: center;
+  padding: 10px 0; border-radius: 10px;
+  background: var(--card2); border: 1px dashed var(--line); color: var(--muted);
+  font-weight: 700; font-size: 15px;
+}
+
+/* ---- "Done" bar: the user's own confirmation that an entry is finished ----
+   Nothing auto-completes any more, so this is the only way an entry gets its
+   tick. It floats just above the dock, clear of the keyboard, and slides up
+   about a second after the last reading lands. */
+.donebar {
+  position: fixed; left: 0; right: 0; z-index: 45;
+  bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) - 6px);
+  display: flex; justify-content: center;
+  padding: 0 16px;
+  opacity: 0; transform: translateY(18px); pointer-events: none;
+  transition: opacity .22s ease, transform .26s cubic-bezier(.2,.9,.3,1.2);
+}
+.donebar.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
+/* Keep the last of the page's own controls reachable — without this the bar
+   parks itself on top of whatever sits at the bottom of the screen. */
+.screen:has(.donebar.show) { padding-bottom: 76px; }
+.donebar-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  width: auto; min-width: 190px;
+  background: var(--good); color: #fff; border: none;
+  border-radius: 999px; padding: 15px 30px;
+  font-size: 16.5px; font-weight: 800; letter-spacing: .2px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.34), 0 0 0 4px rgba(53,192,122,.16);
+}
+.donebar-btn:active { transform: scale(.96); }
+.donebar-btn .db-check {
+  width: 24px; height: 24px; border-radius: 50%;
+  background: rgba(255,255,255,.22);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 900; flex: 0 0 auto;
 }
 
 /* ---- battery graphic (cells inside a battery shape) ---- */

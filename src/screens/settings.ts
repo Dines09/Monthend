@@ -2,11 +2,13 @@ import { h, topbar, screen, toast, passwordPrompt } from "../ui";
 import { db, getSetting, setSetting } from "../db";
 import { debounce } from "../util";
 import { hapticsEnabled, setHaptics, tapFeedback } from "../feedback";
+import { exportBackup, lastBackupDay } from "../backup";
 
 export async function renderSettings(_p: Record<string, string>, mount: HTMLElement) {
   const vessel = await getSetting("vessel", "SEAWAYS MIRAGE");
   const vesselMT = await getSetting("vesselMT", "M.T. SEAWAYS MIRAGE");
   const checkedBy = await getSetting("checkedBy", "ETO");
+  const lastBackup = await lastBackupDay();
 
   const field = (lab: string, node: Node) => h("label", { class: "field" }, h("span", { class: "lab" }, lab), node);
   const txt = (key: string, val: string) =>
@@ -34,6 +36,9 @@ export async function renderSettings(_p: Record<string, string>, mount: HTMLElem
       h("h2", { style: { marginLeft: 0 } }, "Data"),
       h("div", { class: "card" },
         h("div", { class: "hint", style: { marginBottom: "10px" } }, "Historic Jan–June 2026 data is seeded from your original files. Your daily entries add on top."),
+        h("div", { class: "hint", style: { marginBottom: "10px" } },
+          "A backup downloads automatically once a day. ",
+          lastBackup ? h("strong", {}, `Last backup: ${lastBackup}`) : h("strong", {}, "No backup yet.")),
         h("button", { class: "btn secondary", onClick: exportBackup }, "⬇ Backup all data (JSON)"),
         h("div", { style: { height: "8px" } }),
         h("label", { class: "btn secondary", style: { position: "relative", overflow: "hidden" } }, "⬆ Restore from backup",
@@ -54,14 +59,6 @@ export async function renderSettings(_p: Record<string, string>, mount: HTMLElem
         "This web app is developed by ETO.", h("br"), "Month End PWA · works offline once installed")
     )
   );
-}
-
-async function exportBackup() {
-  const dump: Record<string, any> = {};
-  for (const table of db.tables) dump[table.name] = await table.toArray();
-  const blob = new Blob([JSON.stringify(dump)], { type: "application/json" });
-  downloadBlob(blob, `monthend-backup-${new Date().toISOString().slice(0, 10)}.json`);
-  toast("Backup downloaded");
 }
 
 async function importBackup(e: Event) {
@@ -92,15 +89,4 @@ async function resetAll() {
   if (!ok) return;
   await db.delete();
   location.reload();
-}
-
-export function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.append(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 4000);
 }

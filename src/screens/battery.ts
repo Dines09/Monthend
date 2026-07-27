@@ -1,4 +1,4 @@
-import { h, topbar, screen, numInput, toast, segmented, progressRing, type ReadingSpec } from "../ui";
+import { h, topbar, screen, numInput, toast, segmented, progressRing, achievement, doneBar, type ReadingSpec } from "../ui";
 import { db, type BatteryEntry } from "../db";
 import { masters } from "../seed";
 import { saturdaysInMonth, ymParts, debounce, ddMmmYyyy, parseIso, MONTHS_SHORT, isoDate } from "../util";
@@ -29,6 +29,17 @@ export async function renderBattery(_p: Record<string, string>, mount: HTMLEleme
   });
   const body = h("div", {});
   const ringWrap = h("div", {});
+  // Banks the user has confirmed this visit, keyed date+bank, so re-opening a
+  // finished bank doesn't offer Done again.
+  const confirmed = new Set<string>();
+  // Offered once every cell of the bank is filled; nothing auto-completes.
+  const done = doneBar({
+    label: "Done",
+    onDone: () => {
+      confirmed.add(`${selDate}:${banks[bankIdx].id}`);
+      achievement("Bank completed!", `${shortBankName(banks[bankIdx])} saved for ${selDate}`);
+    },
+  });
 
   // Same one-line header as ICCP: month chip · Saturday chip · progress ring,
   // with the Saturday picker in the panel that pulls down.
@@ -78,7 +89,7 @@ export async function renderBattery(_p: Record<string, string>, mount: HTMLEleme
           return h("button", {
             class: `satcard${s === selDate ? " sel" : ""}${done ? " done" : ""}${future ? " future" : ""}`,
             type: "button",
-            onClick: () => { selDate = s; syncSatChip(); head.setOpen(false); void buildSatPanel(); renderBank(); },
+            onClick: () => { selDate = s; syncSatChip(); head.closeByUser(); void buildSatPanel(); renderBank(); },
           },
             h("span", { class: "st-d" }, String(parseIso(s).getDate()).padStart(2, "0")),
             h("span", { class: "st-m" }, MONTHS_SHORT[parseIso(s).getMonth()].toUpperCase()),
@@ -96,6 +107,8 @@ export async function renderBattery(_p: Record<string, string>, mount: HTMLEleme
 
   async function renderBank() {
     body.replaceChildren();
+    // Switching bank or Saturday must not carry a pending Done offer over.
+    done.reset();
     if (!selDate) { body.append(h("div", { class: "list-empty" }, "No Saturdays in this month.")); return; }
     const bank = banks[bankIdx];
     const isCCA = bank.measure === "CCA";
@@ -106,6 +119,18 @@ export async function renderBattery(_p: Record<string, string>, mount: HTMLEleme
     });
     let remarkVal = existing?.remark ?? "GOOD";
     const meta = await db.batteryMeta.get(bank.id);
+
+    // Previous cycle's readings for this same bank, shown as grey placeholders so
+    // the user can see what the cell read last Saturday while entering today's.
+    const prevEntry = await previousBankEntry(selDate, bank.id);
+    const prevVolt = (i: number) => {
+      const v = prevEntry?.readings?.[i]?.volt;
+      return typeof v === "number" ? String(v) : "—";
+    };
+    const prevAux = (i: number) => {
+      const v = prevEntry?.readings?.[i]?.aux;
+      return typeof v === "number" ? String(v) : "CCA";
+    };
 
     // Description of the bank being entered.
     body.append(
@@ -125,37 +150,25 @@ export async function renderBattery(_p: Record<string, string>, mount: HTMLEleme
     // Voltage rule for this bank: 2 V cells vs. 12 V (lifeboat / emergency) banks.
     const voltSpec = isCCA ? CELL_12V : CELL_2V;
 
-    // Ordered list of inputs so a settled value auto-advances to the next field.
-    const order: HTMLInputElement[] = [];
-    const focusNext = (from: HTMLInputElement) => {
-      const idx = order.indexOf(from);
-      for (let j = idx + 1; j < order.length; j++) {
-        if (order[j].value.trim() === "") { order[j].focus(); return; }
-      }
-      (document.activeElement as HTMLElement | null)?.blur?.();
-    };
-
     // Battery graphic: one tappable cell per 2V cell (or per battery for CCA).
+    // Focus is never moved for the user — a cell voltage like 2.11 must be
+    // typeable in full without the keyboard being pulled away part-way.
     const cols = readings.length <= 2 ? 2 : readings.length <= 6 ? 3 : 4;
     const cellsWrap = h("div", { class: "batt-cells", style: { gridTemplateColumns: `repeat(${cols}, 1fr)` } });
     readings.forEach((r, i) => {
       const cell = h("div", { class: `cell ${r.volt != null ? "filled" : ""}` });
       const warn = h("div", { class: "field-warn" }, "");
       const voltInp = numInput({
-        value: r.volt ?? null, placeholder: "—", spec: voltSpec,
+        value: r.volt ?? null, placeholder: prevVolt(i), spec: voltSpec,
         onInput: debounce(async (v) => { readings[i].volt = v; cell.classList.toggle("filled", v != null); recalcTotal(); await persist(); }, 300),
-        onSettled: () => focusNext(voltInp),
       });
-      order.push(voltInp);
       cell.append(h("div", { class: "cnum" }, isCCA ? r.label : `Cell ${r.label}`), voltInp);
       if (isCCA) {
         const ccaInp = numInput({
-          value: typeof r.aux === "number" ? r.aux : null, placeholder: "CCA", spec: CCA_SPEC,
+          value: typeof r.aux === "number" ? r.aux : null, placeholder: prevAux(i), spec: CCA_SPEC,
           onInput: debounce(async (v) => { readings[i].aux = v; await persist(); }, 300),
-          onSettled: () => focusNext(ccaInp),
         });
         ccaInp.classList.add("cca");
-        order.push(ccaInp);
         cell.append(ccaInp);
       }
       cell.append(warn);
@@ -186,6 +199,10 @@ export async function renderBattery(_p: Record<string, string>, mount: HTMLEleme
       // Keep the header ring and the Saturday panel counts in step with the edit.
       await refreshRing();
       await buildSatPanel();
+      // Every cell filled → offer Done (after its delay). Anything missing
+      // again → withdraw it. The tick only follows the user's own tap.
+      if (bankComplete(entry) && !confirmed.has(`${selDate}:${bank.id}`)) done.arm();
+      else if (!bankComplete(entry)) done.disarm();
     }
   }
 
@@ -199,7 +216,8 @@ export async function renderBattery(_p: Record<string, string>, mount: HTMLEleme
       h("div", { class: "ph-pull" }, "pull down to choose Saturday"),
       bankSeg,
       h("div", { style: { height: "12px" } }),
-      body
+      body,
+      done.el
     )
   );
 
@@ -218,6 +236,18 @@ export async function renderBattery(_p: Record<string, string>, mount: HTMLEleme
  * the CCA banks, a CCA figure too). One filled cell is not a completed bank —
  * a tick there would tell the user a job is done when it isn't.
  */
+/**
+ * The most recent entry for this bank *before* `date` — usually last Saturday,
+ * but it falls back further so a skipped week still shows something useful.
+ * Used for the grey placeholder readings.
+ */
+async function previousBankEntry(date: string, bankId: string): Promise<BatteryEntry | undefined> {
+  const rows = await db.battery.where("bankId").equals(bankId).toArray();
+  return rows
+    .filter((r) => r.date < date)
+    .sort((a, b) => b.date.localeCompare(a.date))[0];
+}
+
 export function bankComplete(e: BatteryEntry | undefined): boolean {
   if (!e?.readings?.length) return false;
   // The CCA banks (lifeboat / emergency gen) also need their CCA figure. Those

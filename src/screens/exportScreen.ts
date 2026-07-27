@@ -3,7 +3,7 @@ import { h, topbar, screen, toast } from "../ui";
 import { RECORDS } from "../records";
 import { GENERATORS, type ExportResult } from "../export/generate";
 import { defaultReportYm, monthLabel, MONTHS_FULL, quarterWindow, ym as ymOf } from "../util";
-import { downloadBlob } from "./settings";
+import { downloadBlob } from "../backup";
 
 export async function renderExport(_p: Record<string, string>, mount: HTMLElement) {
   let curYm = defaultReportYm();

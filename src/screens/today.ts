@@ -48,21 +48,33 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
   const primary: Mode = sat ? "sat" : "daily";
   let active: Mode = "daily";
 
+  const { year, month } = ymParts(curYm);
+  const sats = saturdaysInMonth(year, month);
+
   // ---- gather quick status for the tile badges ----
-  const iccpToday = await db.iccpDaily.get(todayIso);
+  // Every query this screen needs, fired at once. Awaited one after another
+  // (as they used to be) the round trips stacked up into a visible blank pause
+  // when arriving here from a record screen — the "lag" after completing a day.
+  const [iccpToday, allBattery, allFireTests, iccpRows, vessel] = await Promise.all([
+    db.iccpDaily.get(todayIso),
+    db.battery.toArray(),
+    db.fireTest.toArray(),
+    db.iccpDaily.where("date").between(`${curYm}-00`, `${curYm}-99`).toArray(),
+    vesselName(),
+  ]);
+
   // A day is "entered" only when EVERY reading is in — a part-filled day is
   // still pending work. `area` is auto-filled on opening the screen, so it must
   // not count towards this at all.
   const iccpDone = iccpComplete(iccpToday);
 
-  const { year, month } = ymParts(curYm);
-  const sats = saturdaysInMonth(year, month);
-  const battDates = new Set((await db.battery.toArray()).map((e) => e.date));
+  const battDates = new Set(allBattery.map((e) => e.date));
   const pastSats = sats.filter((s) => s <= todayIso);
   const missed = pastSats.filter((s) => !battDates.has(s));
   const nextSat = sats.find((s) => s > todayIso);
+  // Derived from the single battery scan above rather than a second query.
   const batTodayCount = sat
-    ? (await db.battery.where("date").equals(todayIso).toArray()).filter(bankComplete).length
+    ? allBattery.filter((e) => e.date === todayIso && bankComplete(e)).length
     : 0;
 
   // Fire-detector roster: which detectors are scheduled for the upcoming (or
@@ -75,7 +87,7 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
     const keys = new Set(fireUpcomingDets.map((d) => d.detKey));
     const { startYm, endYm } = fireSession.plan;
     const done = new Set<string>();
-    for (const t of await db.fireTest.toArray()) {
+    for (const t of allFireTests) {
       if (!keys.has(t.detKey)) continue;
       const m = t.testedDate.slice(0, 7);
       if (m >= startYm && m <= endYm) done.add(t.detKey);
@@ -143,15 +155,13 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
   // the record card so the user can see at a glance how much is still pending.
   const dim = new Date(year, month, 0).getDate();
   const daysSoFar = Math.min(dim, today.getDate());
-  const iccpRows = await db.iccpDaily
-    .where("date").between(`${curYm}-00`, `${curYm}-99`).toArray();
   // Fully-entered days only; anything part-filled counts as still pending.
   const iccpEntered = iccpRows.filter(iccpComplete).length;
   const iccpPending = Math.max(0, daysSoFar - iccpEntered);
 
   // Only fully-entered banks count — a bank with one cell filled is still due.
   const battBySat = new Map<string, number>();
-  for (const e of await db.battery.toArray()) {
+  for (const e of allBattery) {
     if (!e.date.startsWith(curYm) || !bankComplete(e)) continue;
     battBySat.set(e.date, (battBySat.get(e.date) ?? 0) + 1);
   }
@@ -237,7 +247,7 @@ export async function renderToday(_p: Record<string, string>, mount: HTMLElement
   }
 
   mount.append(
-    topbar("Month End", `${await vesselName()} · ${ddMmmYyyy(todayIso)}${sat ? " · SATURDAY" : ""}`),
+    topbar("Month End", `${vessel} · ${ddMmmYyyy(todayIso)}${sat ? " · SATURDAY" : ""}`),
     screen(modebar, h("div", { style: { height: "6px" } }), listEl)
   );
   renderList();

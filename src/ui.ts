@@ -69,6 +69,9 @@ export function initRouter(mount: HTMLElement) {
   renderRoute();
 }
 
+// Guards against a slow screen painting after the user has already navigated on.
+let renderSeq = 0;
+
 async function renderRoute() {
   const path = location.hash.slice(1) || "/";
   for (const r of routes) {
@@ -76,8 +79,15 @@ async function renderRoute() {
     if (m) {
       const params: Record<string, string> = {};
       r.keys.forEach((k, i) => (params[k] = decodeURIComponent(m[i + 1])));
-      clear(mountEl);
-      await r.handler(params, mountEl);
+      const seq = ++renderSeq;
+      // Build the new screen off-document, then swap it in as one operation.
+      // Clearing the mount first (as this used to) blanked the app for however
+      // long the handler's database queries took, which is what made moving to
+      // the next screen feel like a stall rather than a transition.
+      const staging = h("div", { class: "route-stage" });
+      await r.handler(params, staging);
+      if (seq !== renderSeq) return; // a newer navigation won — discard this one
+      mountEl.replaceChildren(...Array.from(staging.childNodes));
       window.scrollTo(0, 0);
       updateNav(path);
       return;
@@ -479,28 +489,11 @@ export interface ReadingSpec {
   allowOverride?: boolean;
 }
 
-// Is `raw` a completed entry per the spec? Used to decide auto-advance: e.g. a
-// draft of "11.3" (2 int digits, 1 decimal) is done, "11" alone is not yet.
-function isSettled(raw: string, spec: ReadingSpec): boolean {
-  const dec = spec.decimals ?? 0;
-  const m = raw.match(/^(\d+)(?:\.(\d+))?$/);
-  if (!m) return false;
-  const [, intPart, decPart = ""] = m;
-  if (dec > 0) return decPart.length >= dec; // needs the decimal digit(s)
-  // integer field: settled once it has the expected number of whole digits
-  return spec.intDigits ? intPart.length >= spec.intDigits : true;
-}
-
 export function inRange(v: number | null, spec: ReadingSpec): boolean {
   return v == null || (v >= spec.min && v <= spec.max);
 }
 
 // numeric input helper
-// How long a settled value waits before focus moves on. Without this the
-// keyboard vanishes the instant the last digit lands, which reads as the app
-// snatching the field away mid-entry — and leaves no room to correct a typo.
-const SETTLE_DELAY = 500;
-
 export function numInput(opts: {
   value?: number | null;
   placeholder?: string;
@@ -509,21 +502,10 @@ export function numInput(opts: {
   decimal?: boolean;
   readonly?: boolean;
   spec?: ReadingSpec;
-  // Called when a valid, "settled" value is typed — used to auto-advance focus.
-  onSettled?: (v: number) => void;
   // Called when the user taps "Use anyway" on an out-of-range value (spec.allowOverride).
   onOverride?: (v: number) => void;
 }): HTMLInputElement {
   const spec = opts.spec;
-  // Pending auto-advance. Any further keystroke cancels it, so a user who is
-  // still typing (e.g. correcting "8" to "18") is never interrupted.
-  let settleTimer: any;
-  const scheduleSettle = (v: number) => {
-    clearTimeout(settleTimer);
-    if (!opts.onSettled) return;
-    settleTimer = setTimeout(() => opts.onSettled!(v), SETTLE_DELAY);
-  };
-  const cancelSettle = () => clearTimeout(settleTimer);
   // The value the user has explicitly confirmed via "Use anyway", so we don't
   // keep flagging it red. Reset whenever the raw text changes to something else.
   let overridden: number | null = null;
@@ -537,8 +519,6 @@ export function numInput(opts: {
     onInput: (e: Event) => {
       const el = e.target as HTMLInputElement;
       let raw = el.value.trim();
-      // A new keystroke always supersedes a pending advance.
-      cancelSettle();
       // Clamp to the allowed number of decimal places while typing so a decimal
       // field like draft only ever holds one digit after the point.
       if (spec && (spec.decimals ?? 0) >= 0) {
@@ -560,24 +540,80 @@ export function numInput(opts: {
               overridden = val;
               setInvalid(inp, false);
               opts.onOverride?.(val);
-              if (opts.onSettled && isSettled(raw, spec)) opts.onSettled(val);
             }
           : undefined;
         setInvalid(inp, bad, spec.warn, onUseAnyway);
         opts.onInput(val);
-        // Auto-advance when the value is valid (or confirmed) AND fully entered
-        // — but only after a short pause, so the keyboard doesn't snap away
-        // while the user is still entering or fixing the number.
-        if (!bad && val != null && isSettled(raw, spec)) scheduleSettle(val);
         return;
       }
       opts.onInput(val);
     },
   });
-  // If the user moves on themselves (taps another field, dismisses the
-  // keyboard), a queued advance must not yank focus somewhere afterwards.
-  inp.addEventListener("blur", cancelSettle);
   return inp;
+}
+
+// ---- "Done" bar: the user confirms an entry is finished ----
+//
+// Entry screens used to decide for themselves that the user had finished — the
+// moment the last field looked full, focus jumped away, the keyboard dropped and
+// a tick appeared. On a two-digit reading that fired after the first digit, so
+// the value could not even be typed. Nothing auto-completes now: when every
+// reading is present the app *offers* a Done button, and only the user's tap on
+// it marks the entry complete.
+//
+// The delay before it appears is deliberate. Popping up the instant the last
+// digit lands would cover the keyboard while the user is still typing (or about
+// to correct a typo), so the bar waits ~1s of no further edits.
+const DONE_DELAY = 1000;
+
+export interface DoneBar {
+  el: HTMLElement;
+  /** All readings present — offer the button (after the delay). */
+  arm(): void;
+  /** Something is missing again — take the offer away immediately. */
+  disarm(): void;
+  /** Hide it and cancel anything pending (e.g. once the entry is confirmed). */
+  reset(): void;
+}
+
+export function doneBar(opts: { label?: string; onDone: () => void }): DoneBar {
+  let timer: any;
+  let shown = false;
+
+  const btn = h("button", { class: "donebar-btn", type: "button" },
+    h("span", { class: "db-check" }, "✓"), opts.label ?? "Done");
+  const el = h("div", { class: "donebar" }, btn);
+
+  const show = () => {
+    if (shown) return;
+    shown = true;
+    el.classList.add("show");
+  };
+  const hide = () => {
+    clearTimeout(timer);
+    if (!shown) return;
+    shown = false;
+    el.classList.remove("show");
+  };
+
+  btn.addEventListener("click", () => {
+    // Drop the keyboard on the way out so the celebration lands on a settled
+    // screen rather than over a half-covered form.
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    hide();
+    opts.onDone();
+  });
+
+  return {
+    el,
+    arm() {
+      if (shown) return;
+      clearTimeout(timer);
+      timer = setTimeout(show, DONE_DELAY);
+    },
+    disarm: hide,
+    reset: hide,
+  };
 }
 
 // A field bundle: a validated input plus an inline warning line beneath it that

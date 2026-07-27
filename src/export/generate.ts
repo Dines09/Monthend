@@ -7,7 +7,7 @@ import {
   saturdaysInMonth, slipringDefault,
 } from "../util";
 import {
-  busbarMonthCol, freonMonthCol, motorTempMonthCol, vibrationVelCol, vibrationAccCol,
+  busbarMonthCol, freonMonthCol, freonValueFor, motorTempMonthCol, vibrationVelCol, vibrationAccCol,
   cmTempCol, cmVibVelCol, cmVibAccCol, ICCP_COLS, BATTERY_WEEK_COLS, BATTERY_BANKS, colLetter,
 } from "./columns";
 
@@ -111,8 +111,12 @@ export async function genFreon(ymStr: string): Promise<ExportResult> {
     const map = new Map(rows.map((r) => [r.systemRow, r.consumed]));
     let totalCons = 0;
     for (const s of masters.freonSystems) {
-      const v = map.get(s.row);
-      setVal(ws, s.row, col, v ?? null);
+      // Workshop AC, Inert Gas / Chilling Plant and Cargo Switchboard never
+      // carry a figure on this vessel, and Bridge AC only appears when one was
+      // entered. `freonValueFor` is the single rule the screen shares, so the
+      // sheet and the ROB total can't drift from what the user sees.
+      const v = freonValueFor(s.row, map.get(s.row));
+      setVal(ws, s.row, col, v);
       totalCons += v ?? 0;
     }
     const meta = await db.freonMeta.get(mym);

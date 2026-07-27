@@ -3,6 +3,9 @@ import { db } from "../db";
 import { masters } from "../seed";
 import { ym as ymOf, defaultReportYm, debounce } from "../util";
 import { periodHead, bindHeadGestures } from "./periodhead";
+// The blank/conditional rules live with the other sheet mappings so the screen
+// and the exporter can't disagree about which systems carry a figure.
+import { FREON_BLANK_ROWS, FREON_CONDITIONAL_ROWS, freonValueFor } from "../export/columns";
 
 export async function renderFreon(_p: Record<string, string>, mount: HTMLElement) {
   let curYm = defaultReportYm();
@@ -21,19 +24,36 @@ export async function renderFreon(_p: Record<string, string>, mount: HTMLElement
     const prevMap = new Map(prev.map((r) => [r.systemRow, r.consumed]));
     const meta = await db.freonMeta.get(curYm);
 
+    // Systems that take a reading — the always-blank ones are shown but not
+    // entered, so they must not count towards the progress ring either.
+    const enterable = masters.freonSystems.filter((s) => !FREON_BLANK_ROWS.has(s.row));
+
     let filled = 0;
     for (const s of masters.freonSystems) {
+      const blank = FREON_BLANK_ROWS.has(s.row);
       const val = valMap.get(s.row);
-      if (val != null) filled++;
-      const inp = numInput({
-        value: val ?? null,
-        placeholder: prevMap.get(s.row) != null ? String(prevMap.get(s.row)) : "0",
-        onInput: debounce(async (v) => { await saveFreon(curYm, s.row, v); recount(); }, 350),
-      });
+      if (!blank && val != null) filled++;
+
+      // Always-blank systems get a locked "—" instead of an input: there is no
+      // reading for them, and an empty box would just invite one that export
+      // would then silently drop.
+      const control = blank
+        ? h("div", { class: "freon-blank" }, "—")
+        : numInput({
+            value: val ?? null,
+            placeholder: prevMap.get(s.row) != null ? String(prevMap.get(s.row)) : "0",
+            onInput: debounce(async (v) => { await saveFreon(curYm, s.row, v); recount(); }, 350),
+          });
+
       body.append(
-        h("div", { class: "mrow" },
-          h("div", { class: "mname" }, s.name, s.capacity != null ? h("small", {}, `Capacity ${s.capacity} kg`) : null),
-          inp)
+        h("div", { class: `mrow${blank ? " is-blank" : ""}` },
+          h("div", { class: "mname" }, s.name,
+            s.capacity != null ? h("small", {}, `Capacity ${s.capacity} kg`) : null,
+            blank ? h("small", {}, "No reading recorded for this system")
+                  : FREON_CONDITIONAL_ROWS.has(s.row)
+                    ? h("small", {}, "Only shown on the sheet if you enter a value")
+                    : null),
+          control)
       );
     }
 
@@ -57,10 +77,11 @@ export async function renderFreon(_p: Record<string, string>, mount: HTMLElement
           h("strong", {}, `ROB end of month: ${robPreview.robEnd} kg`)))
     );
 
-    ringWrap.replaceChildren(progressRing(filled, masters.freonSystems.length, "left"));
+    ringWrap.replaceChildren(progressRing(filled, enterable.length, "left"));
     async function recount() {
-      const r = await db.freon.where("ym").equals(curYm).count();
-      ringWrap.replaceChildren(progressRing(r, masters.freonSystems.length, "left"));
+      const rows2 = await db.freon.where("ym").equals(curYm).toArray();
+      const n = rows2.filter((r) => !FREON_BLANK_ROWS.has(r.systemRow) && r.consumed != null).length;
+      ringWrap.replaceChildren(progressRing(n, enterable.length, "left"));
     }
   }
 
@@ -95,7 +116,10 @@ export async function computeRob(targetYm: string): Promise<{ robStart: number; 
   let result = { robStart: rob, consumed: 0, received: 0, robEnd: rob };
   for (let m = 1; m <= 12; m++) {
     const ymStr = `${year}-${String(m).padStart(2, "0")}`;
-    const cons = (await db.freon.where("ym").equals(ymStr).toArray()).reduce((a, r) => a + (r.consumed || 0), 0);
+    // Blanked systems contribute nothing, even if an old value is still stored
+    // for them — the ROB chain has to match what the sheet actually shows.
+    const cons = (await db.freon.where("ym").equals(ymStr).toArray())
+      .reduce((a, r) => a + (freonValueFor(r.systemRow, r.consumed) ?? 0), 0);
     const meta = await db.freonMeta.get(ymStr);
     const received = meta?.received ?? 0;
     const robStart = rob;

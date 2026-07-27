@@ -2,6 +2,7 @@ import "./style.css";
 import { h, initRouter, route, navigate, initTheme } from "./ui";
 import { tapFeedback } from "./feedback";
 import { ensureSeeded } from "./seed";
+import { maybeAutoBackup } from "./backup";
 import { renderToday } from "./screens/today";
 import { renderRecords } from "./screens/records";
 import { renderExport } from "./screens/exportScreen";
@@ -56,8 +57,40 @@ route("/rec/freon", renderFreon);
 route("/rec/conditionmon", renderConditionMon);
 route("/rec/overhaul", renderOverhaul);
 
+/**
+ * Block the zoom gestures the CSS can't reach.
+ *
+ * iOS Safari ignores both `user-scalable=no` and `touch-action` for its own
+ * pinch and double-tap zoom, so those two have to be cancelled here; otherwise
+ * a mistap while entering readings leaves the page zoomed and the user has to
+ * fight it back. Ctrl+wheel is the desktop equivalent.
+ */
+function lockZoom() {
+  for (const ev of ["gesturestart", "gesturechange", "gestureend"]) {
+    document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
+  }
+  document.addEventListener("touchmove", (e) => {
+    if ((e as TouchEvent).touches.length > 1) e.preventDefault();
+  }, { passive: false });
+  // Double-tap to zoom: a second tap within 300ms of the first. Cancelling the
+  // touchend also cancels the synthetic click, so controls are left alone —
+  // tapping a day twice quickly on the calendar must still register.
+  let lastTap = 0;
+  document.addEventListener("touchend", (e) => {
+    const t = e.target as HTMLElement | null;
+    if (t?.closest("input, textarea, select, button, a, label, .seg")) { lastTap = 0; return; }
+    const now = Date.now();
+    if (now - lastTap < 300) e.preventDefault();
+    lastTap = now;
+  }, { passive: false });
+  document.addEventListener("wheel", (e) => {
+    if (e.ctrlKey) e.preventDefault();
+  }, { passive: false });
+}
+
 async function boot() {
   initTheme();
+  lockZoom();
   app.append(
     h(
       "div",
@@ -76,6 +109,10 @@ async function boot() {
 
   // Saturday: remind which fire detectors are scheduled for today (once/day).
   maybeShowFireReminder();
+
+  // Daily backup. Deferred a few seconds: a download fired during boot is often
+  // dropped by the browser, and it must never delay the first screen.
+  setTimeout(() => { void maybeAutoBackup(); }, 4000);
 }
 
 boot();

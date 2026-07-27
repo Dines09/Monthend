@@ -1,4 +1,4 @@
-import { h, topbar, screen, numInput, readingField, toast, segmented, progressRing, achievement, helpTip, longPress, navigate, confirmDialog, type ReadingSpec } from "../ui";
+import { h, topbar, screen, numInput, readingField, toast, segmented, progressRing, achievement, helpTip, longPress, navigate, confirmDialog, doneBar, type ReadingSpec } from "../ui";
 import { db, type IccpDaily } from "../db";
 import { isoDate, ymParts, debounce, parseIso, saturdaysInMonth, slipringDefault, MONTHS_FULL, DOW_SHORT } from "../util";
 import { periodHead, bindHeadGestures } from "./periodhead";
@@ -40,11 +40,6 @@ const SPECS: Partial<Record<keyof IccpDaily, ReadingSpec>> = {
   // keyboard while the user is still typing (e.g. 8 on the way to 18).
   shaftMv: { min: 0,    max: 50,   decimals: 0, intDigits: 2, allowOverride: true, warn: "Shaft potential > 50 mV — check your reading again and the shaft earthing / bonding. You can still keep this value if it's correct." },
 };
-
-// Focus jumps to the next field once the current one is validly settled.
-// Order matches the on-screen fields: draft, sea temp, then the ICCP system
-// block (Output Amp -> Output Volt -> Sensing Cell 1 -> Sensing Cell 2), shaft.
-const ADVANCE_ORDER: (keyof IccpDaily)[] = ["draft", "seaTemp", "amp", "volt", "cell1", "cell2", "shaftMv"];
 
 // Count of today's reading fields already filled (for the progress ring and the
 // calendar's "done" tick). A reading counts once a number is present. Values
@@ -99,6 +94,12 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
 
   const form = h("div", {});
   const ringWrap = h("div", {});
+  // Days the user has confirmed with the Done button in this visit, so leaving
+  // and coming back to a finished day doesn't re-offer it.
+  const confirmed = new Set<string>();
+  // Offered once every reading is present; the celebration only fires when the
+  // user taps it. Nothing on this screen auto-completes.
+  const done = doneBar({ label: "Done", onDone: () => { confirmed.add(selDate); void celebrate(); } });
   const calWrap = h("div", { class: "cal" });
   const monthlyBtn = h("button", { class: "btn ghost", style: { marginTop: "16px" },
     onClick: () => navigate(`/rec/iccp-monthly/${curYm}`) },
@@ -109,47 +110,61 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
     if (!selDate.startsWith(curYm)) selDate = `${curYm}-01`;
   }
 
-  async function refreshRing(fireOnComplete: boolean) {
+  /**
+   * The user tapped Done. Confirm any out-of-range readings, then celebrate.
+   * Only ever reached from an explicit tap — never from typing a last digit.
+   */
+  async function celebrate() {
     const saved = await db.iccpDaily.get(selDate);
-    const { done, total } = progressOf(saved);
-    ringWrap.replaceChildren(progressRing(done, total, "left"));
-    const complete = total > 0 && done >= total;
+    const when = selDate === todayIso ? "today" : `Day ${Number(selDate.slice(-2))}`;
+    const odd = outOfRangeReadings(saved);
+    // The day is filled, but some readings sit outside their normal band. Ask
+    // once before marking it done, so a mistyped figure gets caught.
+    if (odd.length) {
+      const list = h("div", { class: "oor-list" },
+        ...odd.map((o) => h("div", { class: "oor-item" },
+          h("span", { class: "oor-lab" }, o.label),
+          h("span", { class: "oor-val" }, String(o.value)))));
+      const ok = await confirmDialog({
+        title: odd.length > 1 ? "Readings are out of range" : "Reading is out of range",
+        body: h("div", {},
+          h("div", {}, "These are outside the normal range for this vessel:"),
+          list,
+          h("div", {}, "Submit them anyway?")),
+        confirm: "Yes, submit",
+        cancel: "Go back",
+      });
+      // Rejected — let the user fix it and offer Done again.
+      if (!ok) { confirmed.delete(selDate); void refreshRing(true); return; }
+    }
+    achievement("Entry completed!", `ICCP / MGPS saved for ${when}`);
+  }
+
+  /**
+   * Repaint the ring + calendar, and decide whether to offer the Done button.
+   *
+   * `offerDone` is false on a plain re-render (opening a day) so the bar doesn't
+   * slide up just for looking at a finished day — it's offered in response to
+   * the user actually entering the readings.
+   */
+  async function refreshRing(offerDone: boolean) {
+    const saved = await db.iccpDaily.get(selDate);
+    const { done: filled, total } = progressOf(saved);
+    ringWrap.replaceChildren(progressRing(filled, total, "left"));
+    const complete = total > 0 && filled >= total;
     // Keep the calendar's colour + done-tick for this day in sync after an edit.
     void refreshCalendar();
-    if (fireOnComplete && complete && !lastComplete) {
-      const when = selDate === todayIso ? "today" : `Day ${Number(selDate.slice(-2))}`;
-      // Dismiss the on-screen keyboard first, then wait ~1.2s after the last
-      // reading settles before celebrating — so the tick lands centered and
-      // never pops up mid-typing of the final value.
-      (document.activeElement as HTMLElement | null)?.blur?.();
-      const odd = outOfRangeReadings(saved);
-      setTimeout(async () => {
-        // The day is filled, but some readings sit outside their normal band.
-        // Ask once before marking it done, so a mistyped figure gets caught.
-        if (odd.length) {
-          const list = h("div", { class: "oor-list" },
-            ...odd.map((o) => h("div", { class: "oor-item" },
-              h("span", { class: "oor-lab" }, o.label),
-              h("span", { class: "oor-val" }, String(o.value)))));
-          const ok = await confirmDialog({
-            title: odd.length > 1 ? "Readings are out of range" : "Reading is out of range",
-            body: h("div", {},
-              h("div", {}, "These are outside the normal range for this vessel:"),
-              list,
-              h("div", {}, "Submit them anyway?")),
-            confirm: "Yes, submit",
-            cancel: "Go back",
-          });
-          if (!ok) { lastComplete = false; return; }
-        }
-        achievement("Entry completed!", `ICCP / MGPS saved for ${when}`);
-      }, 1200);
-    }
+    // All readings in and not yet confirmed → offer Done (after its own delay,
+    // so it never covers the keyboard mid-typing). Anything missing → withdraw.
+    if (complete && offerDone && !confirmed.has(selDate)) done.arm();
+    else if (!complete) done.disarm();
     lastComplete = complete;
   }
 
   async function loadDay() {
     editingMgps = false;
+    // Switching day must never carry a pending Done offer across to the new one.
+    done.reset();
     const saved = await db.iccpDaily.get(selDate);
     const prevDate = isoDate(new Date(parseIso(selDate).getTime() - 86400000));
     const prev = await db.iccpDaily.get(prevDate);
@@ -194,35 +209,20 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
     // Big, glove-friendly labelled field.
     const field = (lab: string, node: Node) => h("label", { class: "field big" }, h("span", { class: "lab" }, lab), node);
 
-    // Registry of reading inputs so a settled value can auto-advance focus to the
-    // next field the user still has to fill.
-    const inputs = new Map<keyof IccpDaily, HTMLInputElement>();
-    const focusNext = (from: keyof IccpDaily) => {
-      const start = ADVANCE_ORDER.indexOf(from);
-      if (start < 0) return;
-      for (let i = start + 1; i < ADVANCE_ORDER.length; i++) {
-        const el = inputs.get(ADVANCE_ORDER[i]);
-        if (el && !el.readOnly && el.value.trim() === "") { el.focus(); return; }
-      }
-      // Nothing left to fill — drop the keyboard so the completion tick can land.
-      (document.activeElement as HTMLElement | null)?.blur?.();
-    };
-
-    // A full reading field (label + validated input + inline warning line). The
-    // input is registered for auto-advance.
+    // A full reading field (label + validated input + inline warning line).
+    // Focus is never moved for the user: they tab or tap to the next field
+    // themselves, so the keyboard stays put until they are finished.
     const rf = (key: keyof IccpDaily, label: string) => {
-      const { wrap, input } = readingField(label, {
+      const { wrap } = readingField(label, {
         value: (rec[key] as number) ?? null,
         placeholder: prev?.[key] != null ? String(prev[key]) : "",
         spec: SPECS[key],
         big: true,
         onInput: debounce(async (v) => { await save({ [key]: v }); await refreshRing(true); }, 300),
-        onSettled: () => focusNext(key),
-        // "Use anyway" on an out-of-range override field (shaft): keep the value,
-        // advance focus, and let the completion tick fire.
-        onOverride: () => { focusNext(key); void refreshRing(true); },
+        // "Use anyway" on an out-of-range override field (shaft): keep the value
+        // and let the Done button be offered.
+        onOverride: () => { void refreshRing(true); },
       });
-      inputs.set(key, input);
       return wrap;
     };
 
@@ -352,7 +352,9 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
     dayChip.classList.toggle("is-today", selDate === todayIso);
   }
 
-  function setCalendar(open: boolean) { head.setOpen(open); }
+  // Closing after a day pick is a deliberate choice: it should stay closed while
+  // the user enters the readings, and not spring back when they scroll up.
+  function setCalendar(open: boolean) { open ? head.setOpen(true) : head.closeByUser(); }
 
   // Switch to a specific ISO day (used by the calendar taps and swipe). Handles
   // crossing into another month and refreshes the header + calendar highlight.
@@ -412,7 +414,8 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
         h("span", { class: `leg-dot ${cls}` }), lab)),
       h("span", { class: "leg" }, h("span", { class: "leg-dot leg-done" }, "✓"), "Done"));
 
-    calWrap.replaceChildren(dow, grid, legend);
+    // Grid on the left, legend down the right — see `.cal` in style.css.
+    calWrap.replaceChildren(h("div", { class: "cal-main" }, dow, grid), legend);
     markSelectedDay();
     await refreshCalendar();
   }
@@ -448,7 +451,8 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
       head.el,
       h("div", { class: "ph-pull" }, "‹ swipe to change day · pull down for calendar ›"),
       form,
-      monthlyBtn
+      monthlyBtn,
+      done.el
     )
   );
 
