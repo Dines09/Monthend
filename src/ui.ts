@@ -186,6 +186,67 @@ export function screen(...nodes: (Node | null)[]): HTMLElement {
   return h("div", { class: "screen" }, ...(nodes.filter(Boolean) as Node[]));
 }
 
+/**
+ * Pull-to-refresh for screens with no periodhead calendar of their own (e.g.
+ * Settings). Pulling down while already at the top of the page shows a small
+ * spinner that tracks the pull, then runs `onRefresh` once the user releases
+ * past the threshold — so there's a visible sign the screen actually redrew,
+ * not just a silent re-render.
+ */
+export function pullToRefresh(view: HTMLElement, onRefresh: () => void | Promise<void>): () => void {
+  const TRIGGER = 62;
+  const indicator = h("div", { class: "ptr-indicator" }, h("span", { class: "ptr-spinner" }));
+  view.prepend(indicator);
+
+  let sy = 0, tracking = false, atTop = false, refreshing = false;
+
+  const setPull = (dy: number) => {
+    const clamped = Math.min(dy, TRIGGER * 1.6);
+    indicator.style.height = `${clamped}px`;
+    indicator.classList.toggle("ptr-ready", clamped >= TRIGGER);
+  };
+
+  const reset = () => {
+    indicator.style.height = "0px";
+    indicator.classList.remove("ptr-ready");
+  };
+
+  const onStart = (y: number, t: EventTarget | null) => {
+    if ((t as HTMLElement | null)?.closest?.("input, select, textarea, button, .seg")) { tracking = false; return; }
+    if (refreshing) { tracking = false; return; }
+    sy = y; tracking = true; atTop = window.scrollY <= 2;
+  };
+
+  const onMove = (y: number) => {
+    if (!tracking || !atTop) return;
+    const dy = y - sy;
+    if (dy > 0) setPull(dy);
+  };
+
+  const onEnd = async (y: number) => {
+    if (!tracking) return;
+    tracking = false;
+    const dy = y - sy;
+    if (atTop && dy >= TRIGGER) {
+      refreshing = true;
+      indicator.classList.add("ptr-spin");
+      await onRefresh();
+      refreshing = false;
+      indicator.classList.remove("ptr-spin");
+    }
+    reset();
+  };
+
+  view.addEventListener("touchstart", (e) => { const t = e.touches[0]; onStart(t.clientY, e.target); }, { passive: true });
+  view.addEventListener("touchmove", (e) => { const t = e.touches[0]; onMove(t.clientY); }, { passive: true });
+  view.addEventListener("touchend", (e) => { const t = e.changedTouches[0]; void onEnd(t.clientY); }, { passive: true });
+  view.addEventListener("pointerdown", (e) => { if (e.pointerType !== "touch") onStart(e.clientY, e.target); });
+  view.addEventListener("pointermove", (e) => { if (e.pointerType !== "touch") onMove(e.clientY); });
+  view.addEventListener("pointerup", (e) => { if (e.pointerType !== "touch") void onEnd(e.clientY); });
+
+  return () => indicator.remove();
+}
+
 // ---- animated segmented control ----
 // A pill-style selector whose highlight slides smoothly under the active
 // option (no measuring: the thumb is exactly one segment wide and translates

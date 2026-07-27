@@ -1,4 +1,4 @@
-import { h, topbar, screen, toast, passwordPrompt } from "../ui";
+import { h, topbar, screen, toast, passwordPrompt, pullToRefresh, navigate } from "../ui";
 import { db, getSetting, setSetting } from "../db";
 import { debounce } from "../util";
 import { hapticsEnabled, setHaptics, tapFeedback } from "../feedback";
@@ -59,6 +59,16 @@ export async function renderSettings(_p: Record<string, string>, mount: HTMLElem
         "This web app is developed by ETO.", h("br"), "Month End PWA · works offline once installed")
     )
   );
+
+  // Settings has no periodhead calendar to pull open like the record screens
+  // do, so it gets its own pull-to-refresh: re-runs the router on this route
+  // to re-read the saved values and backup status, with a visible spinner +
+  // toast so a refresh is obviously something that happened, not a silent
+  // no-op.
+  pullToRefresh(mount, () => {
+    navigate("/settings");
+    toast("Settings refreshed", 1200);
+  });
 }
 
 async function importBackup(e: Event) {

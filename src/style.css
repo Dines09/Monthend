@@ -503,6 +503,20 @@ mark.hl {
 .loading-full { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 60vh; gap: 14px; color: var(--muted); }
 .loading-full .spinner { border-color: rgba(56,182,255,.25); border-top-color: var(--accent); width: 34px; height: 34px; }
 
+/* ---- pull-to-refresh indicator (screens with no periodhead calendar) ---- */
+.ptr-indicator {
+  height: 0; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  transition: height .18s ease;
+}
+.ptr-spinner {
+  width: 20px; height: 20px; border-radius: 50%;
+  border: 3px solid var(--line); border-top-color: var(--muted);
+  transition: border-top-color .15s;
+}
+.ptr-indicator.ptr-ready .ptr-spinner { border-top-color: var(--accent); }
+.ptr-indicator.ptr-spin .ptr-spinner { border-top-color: var(--accent); animation: spin .7s linear infinite; }
+
 /* ---- centered day selector (ICCP) ---- */
 select.dayselect {
   text-align: center; text-align-last: center; font-weight: 700; font-size: 16px;
