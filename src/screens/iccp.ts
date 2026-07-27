@@ -384,6 +384,7 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
   // Build the whole grid for the current month once; refreshCalendar() only
   // recolours/re-ticks the cells afterwards so an edit doesn't rebuild the DOM.
   const dayCells = new Map<string, HTMLButtonElement>();
+  const legendCounts = new Map<string, HTMLElement>();
 
   async function buildCalendar() {
     const { year, month } = ymParts(curYm);
@@ -409,10 +410,17 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
       grid.append(cell);
     }
 
+    legendCounts.clear();
     const legend = h("div", { class: "cal-legend" },
-      ...LEGEND.map(([cls, lab]) => h("span", { class: "leg" },
-        h("span", { class: `leg-dot ${cls}` }), lab)),
-      h("span", { class: "leg" }, h("span", { class: "leg-dot leg-done" }, "✓"), "Done"));
+      ...LEGEND.map(([cls, lab]) => {
+        const count = h("span", { class: "leg-count" }, "0 days");
+        legendCounts.set(cls, count);
+        return h("div", { class: "leg" },
+          h("div", { class: "leg-head" }, h("span", { class: `leg-dot ${cls}` }), lab),
+          count);
+      }),
+      h("div", { class: "leg" },
+        h("div", { class: "leg-head" }, h("span", { class: "leg-dot leg-done" }, "✓"), "Done")));
 
     // Grid on the left, legend down the right — see `.cal` in style.css.
     calWrap.replaceChildren(h("div", { class: "cal-main" }, dow, grid), legend);
@@ -426,12 +434,20 @@ export async function renderIccp(_p: Record<string, string>, mount: HTMLElement)
     const rows = await db.iccpDaily
       .where("date").between(`${curYm}-00`, `${curYm}-99`).toArray();
     const byDate = new Map(rows.map((r) => [r.date, r]));
+    const tally = new Map<string, number>();
     for (const [iso, cell] of dayCells) {
       const rec = byDate.get(iso);
       cell.classList.remove("a-sea", "a-port", "a-anchor", "done");
       const areaCls = rec?.area ? AREA_CLASS[rec.area] : null;
-      if (areaCls) cell.classList.add(areaCls);
+      if (areaCls) {
+        cell.classList.add(areaCls);
+        tally.set(areaCls, (tally.get(areaCls) ?? 0) + 1);
+      }
       if (isComplete(rec)) cell.classList.add("done");
+    }
+    for (const [cls, el] of legendCounts) {
+      const n = tally.get(cls) ?? 0;
+      el.textContent = `${n} day${n === 1 ? "" : "s"}`;
     }
   }
 

@@ -33,6 +33,9 @@
   --cal-sea: #4cc4f0;    --cal-sea-fg: #06283a;
   --cal-port: #35c07a;   --cal-port-fg: #05301c;
   --cal-anchor: #f5901f; --cal-anchor-fg: #3d2405;
+  /* Done tick: white-on-near-black in dark theme, kept off --good so it never
+     blends with the green Port day colour. */
+  --cd-tick-bg: #14232c; --cd-tick-fg: #ffffff;
   /* Top bar sits on a dark blue gradient in both themes — see the light block. */
   --top-fg: #eaf6ff;
   --top-fg-muted: #a9c8dc;
@@ -74,6 +77,10 @@
   --cal-sea: #1f9fd6;    --cal-sea-fg: #ffffff;
   --cal-port: #1f9d5c;   --cal-port-fg: #ffffff;
   --cal-anchor: #e2720b; --cal-anchor-fg: #ffffff;
+  /* Done tick: near-black (a soft grey-black, not pure #000) on white in the
+     light theme, kept off --good so it never blends with the green Port
+     day colour. */
+  --cd-tick-bg: #2a3b46; --cd-tick-fg: #ffffff;
 }
 
 html { transition: background .2s; }
@@ -712,11 +719,15 @@ select.dayselect {
   box-shadow: 0 0 0 2px var(--bg2), 0 0 0 3.5px var(--accent);
 }
 
-/* Done badge: a small green tick in the top-right corner of the circle. */
+/* Done badge: a small tick in the top-right corner of the circle. Deliberately
+   NOT green — the Port day-colour is also green, so a green tick on a green
+   circle was hard to tell apart. Dark theme: white tick on near-black.
+   Light theme: near-black tick on white. Either way it reads as a distinct
+   "done" mark rather than blending into the area colour. */
 .cal-day .cd-tick {
   position: absolute; top: -2px; right: -2px; z-index: 2;
   width: 13px; height: 13px; border-radius: 50%;
-  background: var(--good); color: #fff; border: 1.5px solid var(--bg2);
+  background: var(--cd-tick-bg); color: var(--cd-tick-fg); border: 1.5px solid var(--bg2);
   display: none; align-items: center; justify-content: center;
   font-size: 8px; font-weight: 900; line-height: 1;
 }
@@ -725,10 +736,13 @@ select.dayselect {
 /* ---- legend: a compact column down the right of the calendar ---- */
 .cal-legend {
   flex: 0 0 auto; align-self: stretch;
-  display: flex; flex-direction: column; gap: 7px; justify-content: center;
-  padding-left: 9px; border-left: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 11px; justify-content: center;
+  padding-left: 10px; border-left: 1px solid var(--line);
 }
 .cal-legend .leg {
+  display: flex; flex-direction: column; gap: 2px;
+}
+.cal-legend .leg-head {
   display: inline-flex; align-items: center; gap: 5px;
   font-size: 10px; font-weight: 600; color: var(--muted);
   line-height: 1; white-space: nowrap;
@@ -741,7 +755,13 @@ select.dayselect {
 .cal-legend .leg-dot.a-port  { background: var(--cal-port); }
 .cal-legend .leg-dot.a-anchor{ background: var(--cal-anchor); }
 .cal-legend .leg-dot.leg-done {
-  background: var(--good); color: #fff; font-size: 6px; font-weight: 900;
+  background: var(--cd-tick-bg); color: var(--cd-tick-fg); font-size: 6px; font-weight: 900;
+}
+/* Day counts sit directly under each legend item, indented past the dot so
+   they read as "belonging to" that row instead of floating between rows. */
+.cal-legend .leg-count {
+  font-size: 11px; font-weight: 700; color: var(--text);
+  padding-left: 14px; line-height: 1.1;
 }
 
 .swipehint {
