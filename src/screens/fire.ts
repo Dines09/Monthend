@@ -38,9 +38,10 @@ function areaHeading(d: ScheduledDet): string {
  */
 function testerSummary(dets: ScheduledDet[]): HTMLElement {
   const present = new Set(dets.map((d) => d.kind));
-  // Fixed order (smoke, heat, flame, MCP) so the chips don't reshuffle between
-  // Saturdays — the user learns one layout.
-  const kinds = (Object.keys(KIND_META) as DetKind[]).filter((k) => present.has(k));
+  // Interface units need no tester carried, so they never appear in the
+  // "what to carry" list — they're a visual check on the round instead.
+  const kinds = (Object.keys(KIND_META) as DetKind[])
+    .filter((k) => k !== "interface" && present.has(k));
   return h("div", { class: "tester-row" },
     ...kinds.map((k) =>
       h("div", { class: `tester-chip k-${k}` },
@@ -81,7 +82,14 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
 
   let view: "session" | "all" = "session";
   let sessionSat = session.sessionSat;
-  let recordDate = sessionSat; // date the taps are logged on (editable — e.g. Sunday)
+
+  /**
+   * Date the taps get logged under. A round done late is recorded on the day it
+   * was actually walked, so a Saturday already in the past defaults to today
+   * rather than back-dating itself to the schedule. Always user-editable.
+   */
+  const defaultRecordDate = (sat: string) => (sat < todayIso ? todayIso : sat);
+  let recordDate = defaultRecordDate(sessionSat);
 
   // Tests already recorded this quarter: detKey -> latest ISO date.
   async function testedThisQuarter(): Promise<Map<string, string>> {
@@ -113,7 +121,7 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
   // A single detector row. The location is the actual address on board, so it
   // wraps in full — never truncated — and the tag carries a kind badge telling
   // the user which tester it needs.
-  function detRow(d: ScheduledDet, tested: string | undefined, logDate: string, rightChip?: HTMLElement | null, allowBackdate?: boolean) {
+  function detRow(d: ScheduledDet, tested: string | undefined, logDate: string, rightChip?: HTMLElement | null) {
     // While searching, the tag and location carry the highlight so the user can
     // see the matched text in place.
     const q = query.trim();
@@ -121,32 +129,19 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
       "div",
       {
         class: `det ${tested ? "tested" : ""}`,
-        onClick: () => {
-          // Missed the scheduled Saturday and testing it late? Let the user pick
-          // the actual date it was tested instead of silently back-dating it to
-          // the Saturday — this is what actually goes on the paper record.
-          if (!tested && allowBackdate && logDate !== todayIso) {
-            const picker = h("input", { type: "date", value: todayIso, max: todayIso }) as HTMLInputElement;
-            picker.addEventListener("change", () => {
-              if (picker.value) toggle(d, picker.value);
-              picker.remove();
-            }, { once: true });
-            picker.style.position = "fixed";
-            picker.style.opacity = "0";
-            picker.style.pointerEvents = "none";
-            document.body.append(picker);
-            picker.showPicker ? picker.showPicker() : picker.click();
-            return;
-          }
-          toggle(d, logDate);
-        },
+        onClick: () => toggle(d, logDate),
       },
       h("div", { class: "cb" }, tested ? "✓" : ""),
       h("div", { class: "info" },
         h("div", { class: "idrow" },
           h("span", { class: "id" }, q ? highlight(d.id || "—", q) : (d.id || "—")),
           h("span", { class: `kind k-${d.kind}` }, KIND_META[d.kind].short)),
-        h("div", { class: "loc" }, q ? highlight(d.location || "—", q) : (d.location || "—"))),
+        h("div", { class: "loc" }, q ? highlight(d.location || "—", q) : (d.location || "—")),
+        // SC/SCI/SC1 are interface units, not smoke detectors — no tester is
+        // used on them, so the row says plainly what the job actually is.
+        d.kind === "interface"
+          ? h("div", { class: "det-note" }, "Interface unit — check this unit, not a smoke detector")
+          : null),
       h("div", { class: "detright" },
         rightChip ?? (tested ? h("span", { class: "chip done", style: { fontSize: "10px" } }, ddMon(tested)) : null))
     );
@@ -154,7 +149,7 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
 
   // Render an area-grouped detector list into `container`, in walk order. Each
   // area heading carries the count and the testers needed for that space.
-  function renderZoned(container: HTMLElement, dets: ScheduledDet[], tested: Map<string, string>, logDateFor: (d: ScheduledDet) => string, showSat: boolean, allowBackdate?: boolean) {
+  function renderZoned(container: HTMLElement, dets: ScheduledDet[], tested: Map<string, string>, logDateFor: (d: ScheduledDet) => string, showSat: boolean) {
     container.replaceChildren();
     let curHead = "";
     let group: ScheduledDet[] = [];
@@ -185,7 +180,7 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
         ? h("span", { class: `chip ${tested.has(d.detKey) ? "done" : "pending"}`, style: { fontSize: "10px" } },
             tested.has(d.detKey) ? `✓ ${ddMon(tested.get(d.detKey)!)}` : `→ ${ddMon(plan.satOfDet.get(d.detKey)!)}`)
         : undefined;
-      container.append(detRow(d, tested.get(d.detKey), logDateFor(d), right, allowBackdate));
+      container.append(detRow(d, tested.get(d.detKey), logDateFor(d), right));
     }
     closeGroup();
   }
@@ -264,20 +259,36 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
       );
     }
 
-    // ---- controls (record-date note, session view only) ----
-    // The session itself is picked from the header's Saturday panel, so all
-    // that's left here is the "logged on a different day" note.
+    // ---- controls (record-date picker, session view only) ----
+    // The round often gets done a day or two after the scheduled Saturday, and
+    // it's the actual test date that goes on the record — so the date the taps
+    // are logged under is an editable field right above the list.
     controlsEl.replaceChildren();
     if (view === "session") {
-      const custom = recordDate !== sessionSat;
-      const isPastSat = sessionSat < todayIso;
+      const dateInput = h("input", {
+        type: "date", class: "rec-date", value: recordDate, max: todayIso,
+        "aria-label": "Date these tests are recorded on",
+      }) as HTMLInputElement;
+      dateInput.addEventListener("change", () => {
+        if (!dateInput.value) { dateInput.value = recordDate; return; }
+        recordDate = dateInput.value;
+        toast(`Logging on ${ddMmmYyyy(recordDate)}`, 1200);
+        paint();
+      });
+      const fallback = defaultRecordDate(sessionSat);
+      const custom = recordDate !== fallback;
       controlsEl.append(
-        h("p", { class: "hint" },
+        h("div", { class: "recdate-row" },
+          h("span", { class: "rd-lab" }, "Recorded on"),
+          dateInput,
           custom
-            ? `Logging on ${ddMmmYyyy(recordDate)} — tap the date chip above to change it back.`
-            : isPastSat
-              ? "Missed this Saturday? Tap a detector and pick the actual date you tested it."
-              : "Tap each detector as you test it.")
+            ? h("button", { class: "rd-reset", type: "button",
+                onClick: () => { recordDate = fallback; paint(); } }, "Reset")
+            : null),
+        h("p", { class: "hint" },
+          recordDate !== sessionSat
+            ? `Scheduled for ${ddMmmYyyy(sessionSat)} — tests you tap now are logged on ${ddMmmYyyy(recordDate)}.`
+            : "Tap each detector as you test it. Did it on another day? Change the date above first.")
       );
     }
 
@@ -289,7 +300,7 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
       if (sessionDets.length === 0) {
         listEl.replaceChildren(h("div", { class: "list-empty" }, "No detectors scheduled for this Saturday."));
       } else {
-        renderZoned(listEl, sessionDets, tested, () => recordDate, false, true);
+        renderZoned(listEl, sessionDets, tested, () => recordDate, false);
       }
     } else {
       const shown = allDets.filter((d) => matches(d) !== null);
@@ -329,7 +340,7 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
     onMonth: (ym) => {
       // Jump to the first scheduled Saturday in the chosen month, if any.
       const inMonth = plan.saturdays.filter((s) => s.startsWith(ym));
-      if (inMonth.length) { sessionSat = inMonth[0]; recordDate = sessionSat; }
+      if (inMonth.length) { sessionSat = inMonth[0]; recordDate = defaultRecordDate(sessionSat); }
       else toast("No detector round scheduled in that month", 1600);
       head.syncMonth(sessionSat.slice(0, 7));
       syncSatChip(); void buildSatPanel(); paint(); syncSticky();
@@ -359,7 +370,7 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
             class: `satcard${s === sessionSat ? " sel" : ""}${done ? " done" : ""}${s > todayIso ? " future" : ""}`,
             type: "button",
             onClick: () => {
-              sessionSat = s; recordDate = s;
+              sessionSat = s; recordDate = defaultRecordDate(s);
               syncSatChip(); head.setOpen(false);
               head.syncMonth(s.slice(0, 7));
               void buildSatPanel(); paint(); syncSticky();

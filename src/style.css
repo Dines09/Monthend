@@ -383,6 +383,15 @@ mark.hl {
 .kind.k-heat  { background: rgba(224,163,58,.16); color: #e0a33a; border-color: rgba(224,163,58,.34); }
 .kind.k-flame { background: rgba(240,85,106,.14); color: var(--bad); border-color: rgba(240,85,106,.3); }
 .kind.k-mcp   { background: rgba(53,192,122,.14); color: var(--good); border-color: rgba(53,192,122,.32); }
+/* Interface units (SC / SCI / SC1) — deliberately neutral, so they don't read
+   as one of the tester-driven detector kinds. */
+.kind.k-interface { background: rgba(150,160,180,.16); color: var(--muted); border-color: rgba(150,160,180,.34); }
+
+/* Row note spelling out that an interface unit is checked, not tested. */
+.det-note {
+  margin-top: 3px; font-size: 11.5px; line-height: 1.4;
+  color: var(--muted); font-weight: 600;
+}
 
 /* Area heading: the physical space, with its count and the testers it needs. */
 .zone-hdr {
@@ -456,6 +465,28 @@ mark.hl {
 .updatebar.show { opacity: 1; transform: translateY(0); }
 .updatebar span { flex: 1; min-width: 0; }
 .updatebar .btn { width: auto; flex: 0 0 auto; padding: 9px 16px; font-size: 14px; border-radius: 10px; }
+
+/* Editable "recorded on" date above the fire-test list — a round walked late is
+   logged on the day it was actually done, not the scheduled Saturday. */
+.recdate-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 12px 0 8px; padding: 10px 12px;
+  background: var(--bg2); border: 1px solid var(--line); border-radius: 12px;
+}
+.recdate-row .rd-lab {
+  font-size: 10.5px; font-weight: 800; letter-spacing: .7px;
+  text-transform: uppercase; color: var(--muted);
+}
+.recdate-row .rec-date {
+  flex: 1 1 150px; min-width: 0; font-size: 15px; font-weight: 700;
+  padding: 9px 10px; border-radius: 10px;
+}
+.recdate-row .rd-reset {
+  flex: 0 0 auto; padding: 8px 12px; border-radius: 999px;
+  font-size: 12px; font-weight: 700; cursor: pointer;
+  background: transparent; color: var(--accent);
+  border: 1px solid var(--line);
+}
 
 .hint { font-size: 13px; color: var(--muted); line-height: 1.5; }
 .divider { height: 1px; background: var(--line); margin: 16px 0; }

@@ -29,25 +29,31 @@ export interface ScheduledDet {
 
 // ---- device kind -------------------------------------------------------
 // The tag prefix says what the device is, which decides which tester the
-// engineer has to carry: S / SC / SCI / SC1 / SCM (and anything unlabelled) are
-// smoke detectors; MCP is a manual call point (needs the special key); H is a
-// heat detector; F is a flame detector.
-export type DetKind = "smoke" | "heat" | "flame" | "mcp";
+// engineer has to carry: S (and anything unlabelled) is a smoke detector; MCP is
+// a manual call point (needs the special key); H is a heat detector; F is a
+// flame detector. SC / SCI / SC1 / SCM are NOT detectors at all — they are
+// interface units, which are checked rather than tested with a tester.
+export type DetKind = "smoke" | "heat" | "flame" | "mcp" | "interface";
 
 export const KIND_META: Record<DetKind, { label: string; short: string; tester: string; icon: string }> = {
   smoke: { label: "Smoke detector", short: "SMOKE", tester: "Smoke tester", icon: "💨" },
   heat:  { label: "Heat detector",  short: "HEAT",  tester: "Heat tester",  icon: "🌡️" },
   flame: { label: "Flame detector", short: "FLAME", tester: "Flame tester", icon: "🔥" },
   mcp:   { label: "Manual call point", short: "MCP", tester: "MCP key",     icon: "🔘" },
+  interface: { label: "Interface unit", short: "INTERFACE", tester: "No tester — visual check", icon: "🔌" },
 };
+
+/** Interface units are checked, not tested — no tester is carried for them. */
+export const INTERFACE_KIND: DetKind = "interface";
 
 /**
  * Classify a detector from its tag (and location as a fallback).
  *
- * Order matters: MCP must be checked before the single letters, and "SC…"
- * variants must not be mistaken for anything but smoke. Anything that doesn't
- * match a known prefix — including blank tags — is treated as a smoke detector,
- * which is the overwhelming majority on board.
+ * Order matters: MCP must be checked before the single letters, and the "SC…"
+ * family (SC, SCI, SC1, SCM) must be caught before the bare "S" smoke rule —
+ * those are interface units, not smoke detectors. Anything that doesn't match a
+ * known prefix — including blank tags — is treated as a smoke detector, which is
+ * the overwhelming majority on board.
  */
 export function detKind(id: string, location = ""): DetKind {
   const t = `${id} ${location}`.toUpperCase();
@@ -58,7 +64,9 @@ export function detKind(id: string, location = ""): DetKind {
   if (prefix === "MCP") return "mcp";
   if (prefix === "H") return "heat";
   if (prefix === "F") return "flame";
-  // S, SC, SCI, SC1, SCM, T (time counter unit), blank … all smoke.
+  // SC / SCI / SCM — and "SC1", whose digit is stripped by the prefix match.
+  if (prefix === "SC" || prefix === "SCI" || prefix === "SCM") return "interface";
+  // S, T (time counter unit), blank … all smoke.
   return "smoke";
 }
 
@@ -156,7 +164,7 @@ export function sortByWalk(dets: ScheduledDet[]): ScheduledDet[] {
 
 /** Count of each device kind in a list — drives the "what to carry" summary. */
 export function kindCounts(dets: ScheduledDet[]): Record<DetKind, number> {
-  const out: Record<DetKind, number> = { smoke: 0, heat: 0, flame: 0, mcp: 0 };
+  const out: Record<DetKind, number> = { smoke: 0, heat: 0, flame: 0, mcp: 0, interface: 0 };
   for (const d of dets) out[d.kind]++;
   return out;
 }
