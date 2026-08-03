@@ -22,6 +22,13 @@ function setSumFormula(ws: ExcelJS.Worksheet, row: number, col: number, cellRows
   ws.getCell(row, col).value = { formula: `SUM(${ref})`, result: result ?? 0 } as any;
 }
 
+// Live "= last - consumed + received" ROB-chain formula, referencing the three
+// rows above it in the same column (like the original workbook).
+function setRobFormula(ws: ExcelJS.Worksheet, row: number, col: number, lastRow: number, consRow: number, recvRow: number, result: number) {
+  const L = colLetter(col);
+  ws.getCell(row, col).value = { formula: `${L}${lastRow}-${L}${consRow}+${L}${recvRow}`, result } as any;
+}
+
 const TEMPLATE_BASE = import.meta.env.BASE_URL + "templates/";
 
 async function loadTemplate(name: string): Promise<ExcelJS.Workbook> {
@@ -125,10 +132,10 @@ export async function genFreon(ymStr: string): Promise<ExportResult> {
     const receivedCell = meta && meta.received !== undefined && meta.received !== null ? meta.received : null;
     // ROB rows: 19 last month, 20 total consumed, 21 received, 22 rob end
     setVal(ws, 19, col, rob);
-    setVal(ws, 20, col, totalCons);
+    setSumFormula(ws, 20, col, masters.freonSystems.map((s) => s.row), totalCons);
     setVal(ws, 21, col, receivedCell);
     const robEnd = rob - totalCons + received;
-    setVal(ws, 22, col, robEnd);
+    setRobFormula(ws, 22, col, 19, 20, 21, robEnd);
     rob = robEnd;
   }
   return { filename: fileName("freon", ymStr), blob: await toBlob(wb) };

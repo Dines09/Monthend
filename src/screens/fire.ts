@@ -113,13 +113,34 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
   // A single detector row. The location is the actual address on board, so it
   // wraps in full — never truncated — and the tag carries a kind badge telling
   // the user which tester it needs.
-  function detRow(d: ScheduledDet, tested: string | undefined, logDate: string, rightChip?: HTMLElement | null) {
+  function detRow(d: ScheduledDet, tested: string | undefined, logDate: string, rightChip?: HTMLElement | null, allowBackdate?: boolean) {
     // While searching, the tag and location carry the highlight so the user can
     // see the matched text in place.
     const q = query.trim();
     return h(
       "div",
-      { class: `det ${tested ? "tested" : ""}`, onClick: () => toggle(d, logDate) },
+      {
+        class: `det ${tested ? "tested" : ""}`,
+        onClick: () => {
+          // Missed the scheduled Saturday and testing it late? Let the user pick
+          // the actual date it was tested instead of silently back-dating it to
+          // the Saturday — this is what actually goes on the paper record.
+          if (!tested && allowBackdate && logDate !== todayIso) {
+            const picker = h("input", { type: "date", value: todayIso, max: todayIso }) as HTMLInputElement;
+            picker.addEventListener("change", () => {
+              if (picker.value) toggle(d, picker.value);
+              picker.remove();
+            }, { once: true });
+            picker.style.position = "fixed";
+            picker.style.opacity = "0";
+            picker.style.pointerEvents = "none";
+            document.body.append(picker);
+            picker.showPicker ? picker.showPicker() : picker.click();
+            return;
+          }
+          toggle(d, logDate);
+        },
+      },
       h("div", { class: "cb" }, tested ? "✓" : ""),
       h("div", { class: "info" },
         h("div", { class: "idrow" },
@@ -133,7 +154,7 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
 
   // Render an area-grouped detector list into `container`, in walk order. Each
   // area heading carries the count and the testers needed for that space.
-  function renderZoned(container: HTMLElement, dets: ScheduledDet[], tested: Map<string, string>, logDateFor: (d: ScheduledDet) => string, showSat: boolean) {
+  function renderZoned(container: HTMLElement, dets: ScheduledDet[], tested: Map<string, string>, logDateFor: (d: ScheduledDet) => string, showSat: boolean, allowBackdate?: boolean) {
     container.replaceChildren();
     let curHead = "";
     let group: ScheduledDet[] = [];
@@ -164,7 +185,7 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
         ? h("span", { class: `chip ${tested.has(d.detKey) ? "done" : "pending"}`, style: { fontSize: "10px" } },
             tested.has(d.detKey) ? `✓ ${ddMon(tested.get(d.detKey)!)}` : `→ ${ddMon(plan.satOfDet.get(d.detKey)!)}`)
         : undefined;
-      container.append(detRow(d, tested.get(d.detKey), logDateFor(d), right));
+      container.append(detRow(d, tested.get(d.detKey), logDateFor(d), right, allowBackdate));
     }
     closeGroup();
   }
@@ -249,11 +270,14 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
     controlsEl.replaceChildren();
     if (view === "session") {
       const custom = recordDate !== sessionSat;
+      const isPastSat = sessionSat < todayIso;
       controlsEl.append(
         h("p", { class: "hint" },
           custom
             ? `Logging on ${ddMmmYyyy(recordDate)} — tap the date chip above to change it back.`
-            : "Tap each detector as you test it. Tested on another day? Tap the date chip above.")
+            : isPastSat
+              ? "Missed this Saturday? Tap a detector and pick the actual date you tested it."
+              : "Tap each detector as you test it.")
       );
     }
 
@@ -265,7 +289,7 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
       if (sessionDets.length === 0) {
         listEl.replaceChildren(h("div", { class: "list-empty" }, "No detectors scheduled for this Saturday."));
       } else {
-        renderZoned(listEl, sessionDets, tested, () => recordDate, false);
+        renderZoned(listEl, sessionDets, tested, () => recordDate, false, true);
       }
     } else {
       const shown = allDets.filter((d) => matches(d) !== null);
