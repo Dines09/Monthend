@@ -438,6 +438,23 @@ mark.hl {
 .access-warn .aw-title { font-size: 13px; font-weight: 800; color: #e0a33a; }
 .access-warn .aw-sub { font-size: 11.5px; color: var(--muted); margin-top: 3px; line-height: 1.45; }
 
+/* Standing "isolate the emergency stops" warning on the fire-test screen.
+   Red rather than the amber of .access-warn, and always present — it is a
+   safety step that has to happen before the round starts, not a condition of
+   one particular Saturday. */
+.isolate-warn {
+  display: flex; align-items: flex-start; gap: 10px;
+  margin-top: 12px; padding: 11px 13px; border-radius: 12px;
+  background: rgba(240,85,106,.13); border: 1px solid var(--bad);
+}
+.isolate-warn .iw-ic { font-size: 17px; line-height: 1.2; flex: 0 0 auto; }
+.isolate-warn .iw-body { min-width: 0; }
+.isolate-warn .iw-title {
+  font-size: 13px; font-weight: 800; color: var(--bad);
+  text-transform: uppercase; letter-spacing: .3px;
+}
+.isolate-warn .iw-sub { font-size: 11.5px; color: var(--muted); margin-top: 3px; line-height: 1.45; }
+
 /* Detector search (All view). */
 .det-search { width: 100%; }
 .search-count { margin: 6px 2px 4px; }
@@ -1221,3 +1238,30 @@ label.field.invalid .lab { color: var(--bad); }
 .reminder-card .rm-zones { font-size: 12px; color: var(--muted); margin-top: 4px; }
 .reminder-card .rm-actions { display: flex; gap: 10px; margin-top: 18px; }
 .reminder-card .rm-actions .btn { flex: 1; }
+
+/* Calculated slipring average shown under each week's input, so the user can
+   see the figure that will be exported without opening the sheet. */
+.slip-auto {
+  display: block; margin-top: 4px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .2px; color: var(--good);
+}
+.slip-auto.empty { color: var(--muted); font-weight: 600; }
+
+/* Strainer inspection dates — two side-by-side pickers with fixed labels. */
+.strainer-date { width: 100%; }
+
+/* Completion chip in the top-right of a record / export tile. Absolute so it
+   sits in the corner without reflowing the row, and the tile gets padding on
+   that side so a long title can never run underneath it. */
+.exportfile, .rec-card { position: relative; }
+.exportfile { padding-right: 14px; }
+.rec-status {
+  position: absolute; top: 6px; right: 10px; z-index: 1;
+  font-size: 9.5px; font-weight: 800; letter-spacing: .4px; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 999px; white-space: nowrap; pointer-events: none;
+}
+.rec-status.done { color: var(--good); background: rgba(53,192,122,.15); border: 1px solid rgba(53,192,122,.5); }
+.rec-status.partial { color: var(--warn); background: rgba(240,180,41,.13); border: 1px solid rgba(240,180,41,.45); }
+/* Keep the tile's own text clear of the chip. */
+.exportfile .fname { padding-top: 6px; }
+.rec-card .card-row .body .title { padding-right: 74px; }

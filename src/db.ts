@@ -28,7 +28,14 @@ export interface IccpDaily {
 // ICCP monthly footer (observations, slipring, remark)
 export interface IccpMonthly {
   ym: string; // YYYY-MM
+  /**
+   * Free-text strainer note. Superseded by strainerLow/strainerHigh, which the
+   * screen now edits as two dates; kept so months recorded before that change
+   * still export the text that was entered then.
+   */
   strainerNote?: string;
+  strainerLow?: string;  // YYYY-MM-DD — low sea chest strainer inspected
+  strainerHigh?: string; // YYYY-MM-DD — high sea chest strainer inspected
   obs?: Record<string, string | null>;
   slipring?: (number | null)[];
   remark?: string;

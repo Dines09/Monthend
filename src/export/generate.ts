@@ -4,7 +4,7 @@ import { masters } from "../seed";
 import { recById } from "../records";
 import {
   MONTHS_FULL, ymParts, excelSerial, parseIso, quarterWindow, ddmmyyyy,
-  saturdaysInMonth, slipringDefault,
+  saturdaysInMonth, slipringDefault, slipringAverage,
 } from "../util";
 import {
   busbarMonthCol, freonMonthCol, freonValueFor, motorTempMonthCol, vibrationVelCol, vibrationAccCol,
@@ -31,13 +31,50 @@ function setRobFormula(ws: ExcelJS.Worksheet, row: number, col: number, lastRow:
 
 const TEMPLATE_BASE = import.meta.env.BASE_URL + "templates/";
 
+/**
+ * Load a blank workbook template.
+ *
+ * The templates are precached by the service worker, so this normally never
+ * touches the network. It still has to survive the case where the cache was
+ * cleared and there is no connection to refill it — exporting is the whole
+ * point of the app, so the failure has to say what to do rather than surface a
+ * bare fetch error.
+ */
 async function loadTemplate(name: string): Promise<ExcelJS.Workbook> {
-  const res = await fetch(TEMPLATE_BASE + name);
-  if (!res.ok) throw new Error(`template ${name} not found`);
+  let res: Response | undefined;
+  try {
+    res = await fetch(TEMPLATE_BASE + name);
+  } catch {
+    // Offline and not in the SW cache — look in the cache directly in case the
+    // entry was stored under a different base path than the page is using now.
+    res = await cachedTemplate(name);
+  }
+  if (!res || !res.ok) {
+    res = (await cachedTemplate(name)) ?? res;
+  }
+  if (!res || !res.ok) {
+    throw new Error(
+      `Template "${name}" is not available offline. Open the app once with a connection so it can finish downloading.`
+    );
+  }
   const buf = await res.arrayBuffer();
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buf);
   return wb;
+}
+
+/** Last-resort direct look-up of a template in the service worker's caches. */
+async function cachedTemplate(name: string): Promise<Response | undefined> {
+  if (!("caches" in self)) return undefined;
+  try {
+    return (
+      (await caches.match(TEMPLATE_BASE + name, { ignoreSearch: true })) ??
+      (await caches.match(`/templates/${name}`, { ignoreSearch: true })) ??
+      (await caches.match(`./templates/${name}`, { ignoreSearch: true }))
+    );
+  } catch {
+    return undefined;
+  }
 }
 
 // Write a value while preserving the cell's existing style/number-format.
@@ -57,6 +94,29 @@ async function toBlob(wb: ExcelJS.Workbook): Promise<Blob> {
 export interface ExportResult {
   filename: string;
   blob: Blob;
+}
+
+// ---------- Signature blocks ----------
+/**
+ * The Chief Engineer / ATO names printed on the reports that carry a signature
+ * block. They were baked into the template files, so a change of officer meant
+ * the sheets went out with the previous crew's names on them. They now come
+ * from Settings, and only the sheets that actually have those blocks are
+ * touched — the rest are signed "ETO" generically and are left alone.
+ *
+ * A blank setting leaves the template's own text in place rather than writing
+ * an empty signature line.
+ */
+async function signatories(): Promise<{ chief: string; ato: string }> {
+  return {
+    chief: (await getSetting("chiefEngineer", "")).trim(),
+    ato: (await getSetting("ato", "")).trim(),
+  };
+}
+
+/** Write `value` only when it is non-empty, leaving the template text otherwise. */
+function setIfSet(ws: ExcelJS.Worksheet, row: number, col: number, value: string) {
+  if (value) setVal(ws, row, col, value);
 }
 
 // ---------- Header helpers ----------
@@ -130,8 +190,18 @@ export async function genFreon(ymStr: string): Promise<ExportResult> {
     // Write received exactly as recorded (0 included); null only when no value was entered.
     const received = meta?.received ?? 0;
     const receivedCell = meta && meta.received !== undefined && meta.received !== null ? meta.received : null;
-    // ROB rows: 19 last month, 20 total consumed, 21 received, 22 rob end
-    setVal(ws, 19, col, rob);
+    // ROB rows: 19 last month, 20 total consumed, 21 received, 22 rob end.
+    // All three calculated rows are written as live formulas, so the sheet
+    // recalculates in Excel if any consumption figure is edited after export
+    // instead of silently keeping a stale total. January opens from the
+    // carried-forward figure; every later month reads the previous month's
+    // closing ROB, which is what makes the whole year chain up.
+    if (m === 1) {
+      setVal(ws, 19, col, rob);
+    } else {
+      const prev = colLetter(freonMonthCol(m - 1));
+      ws.getCell(19, col).value = { formula: `${prev}22`, result: rob } as any;
+    }
     setSumFormula(ws, 20, col, masters.freonSystems.map((s) => s.row), totalCons);
     setVal(ws, 21, col, receivedCell);
     const robEnd = rob - totalCons + received;
@@ -163,6 +233,11 @@ export async function genMotorTemp(ymStr: string): Promise<ExportResult> {
       setVal(ws, mo.row, col, map.get(mo.row) ?? null);
     }
   }
+  // Signature block: row 128 carries the names, row 129 the fixed job titles
+  // ("ETO" / "CHIEF ENGINEER"). Both name cells are the top-left of a merge.
+  const { chief, ato } = await signatories();
+  setIfSet(ws, 128, 2, ato);   // B128, above the "ETO" title
+  setIfSet(ws, 128, 7, chief); // G128:J128, above "CHIEF ENGINEER"
   return { filename: fileName("motortemp", ymStr), blob: await toBlob(wb) };
 }
 
@@ -229,6 +304,25 @@ export async function genConditionMon(ymStr: string): Promise<ExportResult> {
   return { filename: fileName("conditionmon", ymStr), blob: await toBlob(wb) };
 }
 
+/** "18 APRIL 2026" — the format the ICCP sheet already uses for these dates. */
+function ddMonthYyyy(iso: string): string {
+  const d = parseIso(iso);
+  return `${String(d.getDate()).padStart(2, "0")} ${MONTHS_FULL[d.getMonth()].toUpperCase()} ${d.getFullYear()}`;
+}
+
+/**
+ * The strainer line for the ICCP footer, or null when neither date is set.
+ * Either side may be blank — a month where only one chest was opened up still
+ * has to report the one that was.
+ */
+function strainerSentence(low?: string, high?: string): string | null {
+  if (!low && !high) return null;
+  const parts: string[] = [];
+  if (low) parts.push(`LOW: ${ddMonthYyyy(low)}`);
+  if (high) parts.push(`HIGH: ${ddMonthYyyy(high)}`);
+  return `Strainer inspected ${parts.join(" , ")}`;
+}
+
 // =================================================================
 //  ICCP / MGPS — month-only
 // =================================================================
@@ -275,16 +369,36 @@ export async function genIccp(ymStr: string): Promise<ExportResult> {
       const lvl = mon.obs?.[key];
       if (lvl && levelCol[lvl]) setVal(ws, row, levelCol[lvl], "*");
     }
-    if (mon.strainerNote) setVal(ws, 45, 7, mon.strainerNote);
+    // "Strainer inspected LOW: 18 APRIL 2026 , HIGH 23 MAY 2026" — composed
+    // from the two dates the screen collects. A month recorded before the
+    // screen used dates still has its free-text note, so that is the fallback.
+    const strainer = strainerSentence(mon.strainerLow, mon.strainerHigh) ?? mon.strainerNote;
+    if (strainer) setVal(ws, 45, 7, strainer);
     if (mon.remark) setVal(ws, 55, 1, mon.remark);
   }
   // Slipring weeks (template rows 46–50): stored value first, else a stable
   // 15–20 mV default for weeks that actually occur this month, else blank.
   const weeks = saturdaysInMonth(year, month).length;
   const slip = mon?.slipring ?? [];
+  // Same rule the monthly screen shows: a week the user typed into wins,
+  // otherwise the average of that week's daily shaft-potential readings, and
+  // only a week with no readings at all falls back to the stable prefill.
+  const shaftByDate = new Map(all.map((d) => [d.date, d.shaftMv]));
   for (let i = 0; i < 5; i++) {
-    const v = slip[i] ?? (i < weeks ? slipringDefault(ymStr, i) : null);
+    let v: number | null = null;
+    if (i < weeks) {
+      v = slip[i] ?? slipringAverage(ymStr, i, shaftByDate) ?? slipringDefault(ymStr, i);
+    }
     setVal(ws, 46 + i, 26, v);
+  }
+  // Signature line. Row 56 is laid out as label/value pairs of merged cells:
+  // A56:C56 "Submitted by" with E56:M56 blank beside it, and O56:Q56
+  // "Chief Engineer" with S56:Z56 blank beside it. The names go in the blank
+  // cells — the labels themselves are left exactly as printed.
+  {
+    const { chief, ato } = await signatories();
+    setIfSet(ws, 56, 5, ato);    // E56:M56, beside "Submitted by"
+    setIfSet(ws, 56, 19, chief); // S56:Z56, beside "Chief Engineer"
   }
   return { filename: fileName("iccp", ymStr), blob: await toBlob(wb) };
 }
@@ -409,6 +523,13 @@ export async function genOverhaul(ymStr: string): Promise<ExportResult> {
     if (r.lastOverhaul) setVal(ws, r.row, 9, excelSerial(parseIso(r.lastOverhaul)));
     if (r.megger !== undefined && r.megger !== null && r.megger !== "") setVal(ws, r.row, 10, r.megger);
     if (r.remarks !== undefined) setVal(ws, r.row, 11, r.remarks);
+  }
+  // Signature block: names on the merged D138:G140 / I138:K140 cells, with the
+  // fixed job titles ("ETO" / "CHIEF ENGINEER") printed below them on row 141.
+  {
+    const { chief, ato } = await signatories();
+    setIfSet(ws, 138, 4, ato);   // D138:G140
+    setIfSet(ws, 138, 9, chief); // I138:K140
   }
   return { filename: fileName("overhaul", ymStr), blob: await toBlob(wb) };
 }

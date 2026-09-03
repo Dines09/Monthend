@@ -116,6 +116,53 @@ export function slipringDefault(ymStr: string, weekIndex: number): number {
   return 15 + (Math.abs(hsh) % 6); // 15..20 inclusive
 }
 
+/**
+ * The calendar days belonging to slipring week `weekIndex` of a month.
+ *
+ * A "week" on this sheet is the stretch of days ending on that week's Saturday:
+ * week 1 runs from the 1st to the first Saturday, week 2 from the day after
+ * that to the second Saturday, and so on. The last week also picks up any days
+ * after the final Saturday, so every day of the month lands in exactly one
+ * week and none is left out of the averages.
+ */
+export function slipringWeekDays(ymStr: string, weekIndex: number): string[] {
+  const { year, month } = ymParts(ymStr);
+  const sats = saturdaysInMonth(year, month);
+  if (weekIndex < 0 || weekIndex >= sats.length) return [];
+  const dim = daysInMonth(year, month);
+  const startDay = weekIndex === 0 ? 1 : parseIso(sats[weekIndex - 1]).getDate() + 1;
+  const isLast = weekIndex === sats.length - 1;
+  const endDay = isLast ? dim : parseIso(sats[weekIndex]).getDate();
+  const out: string[] = [];
+  for (let d = startDay; d <= endDay; d++) {
+    out.push(`${ymStr}-${String(d).padStart(2, "0")}`);
+  }
+  return out;
+}
+
+/**
+ * Average shaft potential (mV) over a slipring week, from the daily readings.
+ *
+ * Returns null when the week has no reading to average — the caller decides
+ * what to do with an empty week. Days at Port/Anchor record a shaft potential
+ * of 0 because the shaft isn't turning; those are real readings and are
+ * included, otherwise a month spent alongside would report no value at all.
+ */
+export function slipringAverage(
+  ymStr: string,
+  weekIndex: number,
+  shaftByDate: Map<string, number | null | undefined>
+): number | null {
+  const vals: number[] = [];
+  for (const iso of slipringWeekDays(ymStr, weekIndex)) {
+    const v = shaftByDate.get(iso);
+    if (typeof v === "number" && Number.isFinite(v)) vals.push(v);
+  }
+  if (!vals.length) return null;
+  const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+  return Math.round(mean);
+}
+
 export function debounce<T extends (...a: any[]) => void>(fn: T, ms = 300): T {
   let t: any;
   return ((...args: any[]) => {

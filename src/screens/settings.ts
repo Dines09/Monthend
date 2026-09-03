@@ -8,6 +8,8 @@ export async function renderSettings(_p: Record<string, string>, mount: HTMLElem
   const vessel = await getSetting("vessel", "SEAWAYS MIRAGE");
   const vesselMT = await getSetting("vesselMT", "M.T. SEAWAYS MIRAGE");
   const checkedBy = await getSetting("checkedBy", "ETO");
+  const chiefEngineer = await getSetting("chiefEngineer", "");
+  const ato = await getSetting("ato", "");
   const lastBackup = await lastBackupDay();
 
   const field = (lab: string, node: Node) => h("label", { class: "field" }, h("span", { class: "lab" }, lab), node);
@@ -21,6 +23,12 @@ export async function renderSettings(_p: Record<string, string>, mount: HTMLElem
       field("Vessel name (headers)", txt("vessel", vessel)),
       field("Vessel name (M.T. …)", txt("vesselMT", vesselMT)),
       field("Checked / Prepared by", txt("checkedBy", checkedBy)),
+
+      h("h2", { style: { marginLeft: 0 } }, "Signatories"),
+      h("p", { class: "hint", style: { margin: "0 0 10px" } },
+        "These names are printed in the signature blocks of the reports that carry them — the motor temp and overhaul sheets, and the Chief Engineer line on the ICCP log. Change them here when the officers change and every export follows."),
+      field("Chief Engineer", txt("chiefEngineer", chiefEngineer)),
+      field("ATO / Electrical Officer", txt("ato", ato)),
 
       h("h2", { style: { marginLeft: 0 } }, "Feedback"),
       h("label", { class: "toggle-row" },
@@ -46,6 +54,12 @@ export async function renderSettings(_p: Record<string, string>, mount: HTMLElem
 
       h("h2", { style: { marginLeft: 0 } }, "Danger zone"),
       h("button", { class: "btn", style: { background: "var(--bad)", color: "#fff" }, onClick: resetAll }, "Reset app (re-seed from originals)"),
+
+      h("h2", { style: { marginLeft: 0 } }, "Updates"),
+      h("div", { class: "card" },
+        h("div", { class: "hint", style: { marginBottom: "10px" } },
+          "The app never needs a connection to run — everything is stored on this phone. Check for a new version only when you have signal."),
+        h("button", { class: "btn secondary", onClick: checkForUpdate }, "↻ Check for updates")),
 
       h("h2", { style: { marginLeft: 0 } }, "About"),
       h("div", { class: "card" },
@@ -84,7 +98,12 @@ async function importBackup(e: Event) {
   setTimeout(() => location.reload(), 800);
 }
 
-/** Code that has to be entered before the records can be wiped. */
+/**
+ * Code that has to be entered before the records can be wiped. It is shown in
+ * the prompt itself — the point of the gate is to stop a mis-tap or an idle
+ * poke at the phone from destroying a month's entries, not to keep a secret
+ * from the person who owns the device.
+ */
 const RESET_CODE = "0000";
 
 async function resetAll() {
@@ -92,11 +111,32 @@ async function resetAll() {
   // mis-tap — or someone else poking at the phone — must not be enough.
   const ok = await passwordPrompt({
     title: "Reset app?",
-    body: "This clears every entry you have made and re-seeds from the original files. Enter the reset password to continue.",
+    body: `This clears every entry you have made and re-seeds from the original files. Enter the reset password to continue (${RESET_CODE}).`,
     code: RESET_CODE,
     confirm: "Reset everything",
   });
   if (!ok) return;
   await db.delete();
   location.reload();
+}
+
+/**
+ * Manual update check. The app deliberately does not look for a new build on
+ * launch (see main.ts) because it is normally offline, so this is the way a
+ * new version gets picked up when there is signal.
+ */
+async function checkForUpdate() {
+  if (!("serviceWorker" in navigator)) return toast("Updates are not supported here", 2000);
+  if (!navigator.onLine) return toast("No connection — the app still works offline", 2400);
+  toast("Checking…", 1200);
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    if (!reg) return toast("Not installed yet", 2000);
+    await reg.update();
+    // An update that found something fires `updatefound` and main.ts shows the
+    // Update bar; if nothing is waiting, the build is already the latest.
+    toast(reg.installing || reg.waiting ? "Downloading update…" : "Already up to date", 2200);
+  } catch {
+    toast("Could not check — try again with a better connection", 2600);
+  }
 }

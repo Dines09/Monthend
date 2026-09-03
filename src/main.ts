@@ -124,10 +124,13 @@ if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", async () => {
     try {
       const reg = await navigator.serviceWorker.register("./sw.js");
-      // Only look for a new build when there's actually a connection; an
-      // update check while offline is a guaranteed failure and must stay silent.
+      // Update checks are deliberately NOT run at boot. The app is used at sea
+      // with no connection for days: an update check on every launch is a
+      // request that can only fail, and while it is failing the browser has
+      // already shown its offline UI. A new build is picked up whenever the
+      // browser revalidates sw.js on its own, and the user can force a check
+      // from Settings. Only look when the browser says a connection appeared.
       const checkForUpdate = () => { if (navigator.onLine) reg.update().catch(() => {}); };
-      checkForUpdate();
       window.addEventListener("online", checkForUpdate);
       // A fresh worker finished installing while an old one is still serving.
       reg.addEventListener("updatefound", () => {

@@ -55,6 +55,25 @@ function specialAreas(dets: ScheduledDet[]): ShipArea[] {
 }
 
 /**
+ * Standing pre-test warning for the alarm round.
+ *
+ * Testing the detectors sets off the systems wired to the fire alarm, so the
+ * emergency stops have to be isolated *before* the first tester is lifted —
+ * otherwise the AC and the sanitary fan trip and the round has to stop while
+ * they are reset. This is not a per-Saturday condition and it is never
+ * dismissed: it shows every time the screen is opened, above the list, so it
+ * cannot be walked past.
+ */
+function isolationWarning(): HTMLElement {
+  return h("div", { class: "isolate-warn", role: "alert" },
+    h("span", { class: "iw-ic" }, "⛔"),
+    h("div", { class: "iw-body" },
+      h("div", { class: "iw-title" }, "Isolate emergency stops 3 before testing"),
+      h("div", { class: "iw-sub" },
+        "Avoids sudden shutdown of the AC, the sanitary fan and the other emergency-stop 3 systems when the alarm sounds.")));
+}
+
+/**
  * Warning banner for a round that goes into a space outside the normal
  * accommodation walk. These have to be opened up / arranged in advance, so the
  * user needs to see it before the day rather than on arriving at a locked door.
@@ -241,6 +260,9 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
           h("div", { class: "fh-sub" },
             `${sessionDets.length} detectors · ${areas.length} areas`),
           h("div", { class: "fh-zones" }, areas.join(" → ")),
+          // Always shown: the emergency stops must be isolated before the
+          // first detector is tested, whichever Saturday this is.
+          isolationWarning(),
           // What to carry down for this round.
           h("div", { class: "fh-carry" }, "Take with you"),
           testerSummary(sessionDets),
@@ -254,6 +276,7 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
             h("div", { class: "fh-kicker" }, `${qLabel} · FULL CYCLE`),
             h("span", { class: `chip ${tested.size >= plan.total ? "done" : "due"}` }, `${tested.size}/${plan.total}`)),
           h("div", { class: "fh-sub" }, "Every detector is scheduled once across the quarter's Saturdays. Tap any to mark tested."),
+          isolationWarning(),
           h("div", { class: "fh-carry" }, "Full cycle needs"),
           testerSummary(allDets))
       );

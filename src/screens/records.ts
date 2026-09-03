@@ -1,5 +1,7 @@
 import { h, topbar, screen, navigate } from "../ui";
 import { RECORDS, type Cadence } from "../records";
+import { statusBadge } from "../status";
+import { defaultReportYm, monthLabel } from "../util";
 
 const cadenceLabel: Record<Cadence, string> = {
   daily: "Daily",
@@ -10,10 +12,17 @@ const cadenceLabel: Record<Cadence, string> = {
 };
 
 export async function renderRecords(_p: Record<string, string>, mount: HTMLElement) {
-  const cards = RECORDS.map((r) =>
-    h(
+  // Progress is reported against the month the app is currently closing out —
+  // the same month Export defaults to — so the two screens never disagree
+  // about what is finished.
+  const curYm = defaultReportYm();
+
+  const cards = await Promise.all(RECORDS.map(async (r) => {
+    const badge = await statusBadge(r.id, curYm);
+    return h(
       "div",
-      { class: "card tap", onClick: () => navigate(r.route) },
+      { class: "card tap rec-card", onClick: () => navigate(r.route) },
+      badge,
       h(
         "div",
         { class: "card-row" },
@@ -26,13 +35,14 @@ export async function renderRecords(_p: Record<string, string>, mount: HTMLEleme
         ),
         h("div", { class: "chev" }, "›")
       )
-    )
-  );
+    );
+  }));
 
   mount.append(
     topbar("Records", "Select a file to enter data"),
     screen(
-      h("p", { class: "hint", style: { marginTop: "4px" } }, "Choose any record to add or edit its data. Export combines everything into the month-end Excel files."),
+      h("p", { class: "hint", style: { marginTop: "4px" } },
+        `Choose any record to add or edit its data. Progress shown for ${monthLabel(curYm)}.`),
       ...cards
     )
   );

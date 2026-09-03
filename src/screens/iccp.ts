@@ -1,6 +1,6 @@
 import { h, topbar, screen, numInput, readingField, toast, segmented, progressRing, achievement, helpTip, longPress, navigate, confirmDialog, doneBar, type ReadingSpec } from "../ui";
 import { db, type IccpDaily } from "../db";
-import { isoDate, ymParts, debounce, parseIso, saturdaysInMonth, slipringDefault, MONTHS_FULL, DOW_SHORT } from "../util";
+import { isoDate, ymParts, debounce, parseIso, saturdaysInMonth, slipringDefault, slipringAverage, slipringWeekDays, MONTHS_FULL, DOW_SHORT } from "../util";
 import { periodHead, bindHeadGestures } from "./periodhead";
 
 const AREAS = ["Sea", "Port", "Anchor"];
@@ -543,19 +543,47 @@ export async function renderIccpMonthly(p: Record<string, string>, mount: HTMLEl
       h("div", { class: "lvlrow" }, ...chips));
   });
 
-  // One slipring week per Saturday in the month; blank weeks fall back to a
-  // stable 15–20 mV prefill (shown as placeholder, used on export).
-  const slipEls = Array.from({ length: weeks }, (_, i) =>
-    h("label", { class: "field" }, h("span", { class: "lab" }, `Week ${i + 1} (mV)`),
-      numInput({ value: slip[i] ?? null, placeholder: String(slipringDefault(curYm, i)),
+  // One slipring week per Saturday in the month. The value is the average of
+  // that week's daily shaft-potential readings, worked out here rather than
+  // asked for — the user has already entered every day's mV on the daily
+  // screen, so re-typing a weekly average is duplicate work and a chance to
+  // get it wrong. Typing in a week still overrides the calculated figure.
+  const dailyRows = await db.iccpDaily.where("date").startsWith(curYm).toArray();
+  const shaftByDate = new Map(dailyRows.map((d) => [d.date, d.shaftMv]));
+
+  const slipEls = Array.from({ length: weeks }, (_, i) => {
+    const auto = slipringAverage(curYm, i, shaftByDate);
+    const days = slipringWeekDays(curYm, i)
+      .filter((d) => typeof shaftByDate.get(d) === "number").length;
+    // The placeholder shows exactly what export will write if the field is
+    // left blank: the calculated average, or the old stable prefill for a week
+    // with no readings at all yet.
+    const shown = auto ?? slipringDefault(curYm, i);
+    const note = auto !== null ? `avg of ${days} day${days === 1 ? "" : "s"}` : "no readings yet";
+    return h("label", { class: "field" },
+      h("span", { class: "lab" }, `Week ${i + 1} (mV)`),
+      numInput({ value: slip[i] ?? null, placeholder: String(shown),
         onInput: debounce(async (nv) => {
           const cur = (await db.iccpMonthly.get(curYm))?.slipring ?? [];
           while (cur.length < weeks) cur.push(null);
           cur[i] = nv; await save({ slipring: cur });
-        }, 350) })));
+        }, 350) }),
+      h("span", { class: `slip-auto${auto !== null ? "" : " empty"}` },
+        slip[i] != null ? `manual · auto ${shown}` : `${shown} mV · ${note}`));
+  });
 
-  const strainerInp = h("input", { value: rec.strainerNote ?? "", placeholder: "Strainer inspected LOW: … HIGH: …",
-    onInput: debounce((e: Event) => save({ strainerNote: (e.target as HTMLInputElement).value }), 400) });
+  // Strainer inspection is two dates, not prose: the sheet always reads
+  // "Strainer inspected LOW: <date>, HIGH: <date>". The labels are fixed and
+  // the user only picks the dates; the exported sentence is composed from them
+  // so it can never be typed in an inconsistent format.
+  const strainerDate = (which: "strainerLow" | "strainerHigh") => {
+    const inp = h("input", {
+      type: "date", class: "strainer-date", value: (rec as any)[which] ?? "",
+      "aria-label": which === "strainerLow" ? "Low sea chest strainer inspected on" : "High sea chest strainer inspected on",
+    }) as HTMLInputElement;
+    inp.addEventListener("change", () => { void save({ [which]: inp.value || undefined }); });
+    return inp;
+  };
   const remarkInp = h("textarea", { rows: 3, value: rec.remark ?? "", placeholder: "Remark",
     onInput: debounce((e: Event) => save({ remark: (e.target as HTMLTextAreaElement).value }), 400) });
 
@@ -570,13 +598,18 @@ export async function renderIccpMonthly(p: Record<string, string>, mount: HTMLEl
       h("div", { class: "card group" }, ...obsEls),
       h("div", { class: "card group" },
         h("div", { class: "group-hdr" }, h("span", {}, "Strainer inspection")),
-        h("label", { class: "field" },
-          h("span", { class: "lab" }, "Inspection note"), strainerInp)),
+        h("p", { class: "hint", style: { margin: "0 0 10px" } },
+          "Pick the date each sea chest strainer was last inspected. The sheet writes them as “Strainer inspected LOW: …, HIGH: …”."),
+        h("div", { class: "grid2" },
+          h("label", { class: "field" },
+            h("span", { class: "lab" }, "LOW sea chest"), strainerDate("strainerLow")),
+          h("label", { class: "field" },
+            h("span", { class: "lab" }, "HIGH sea chest"), strainerDate("strainerHigh")))),
       h("div", { class: "card group" },
         h("div", { class: "group-hdr" },
           h("span", {}, "Slipring checks"),
           h("span", { class: "group-note" }, `${weeks} week${weeks > 1 ? "s" : ""}`)),
-        h("p", { class: "hint", style: { margin: "0 0 10px" } }, "Blank weeks use a 15–20 mV default on export."),
+        h("p", { class: "hint", style: { margin: "0 0 10px" } }, "Averaged from each week’s daily shaft-potential readings. Type a value to override a week."),
         h("div", { class: "grid2" }, ...slipEls)),
       h("div", { class: "card group" },
         h("div", { class: "group-hdr" }, h("span", {}, "Remark")),

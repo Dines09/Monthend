@@ -1,5 +1,6 @@
 import JSZip from "jszip";
 import { h, topbar, screen, toast } from "../ui";
+import { statusBadge } from "../status";
 import { RECORDS } from "../records";
 import { GENERATORS, type ExportResult } from "../export/generate";
 import { defaultReportYm, monthLabel, MONTHS_FULL, quarterWindow, ym as ymOf } from "../util";
@@ -34,25 +35,29 @@ export async function renderExport(_p: Record<string, string>, mount: HTMLElemen
   function syncYm() {
     rebuildMonths();
     curYm = `${yearSel.value}-${String(monthSel.value).padStart(2, "0")}`;
-    renderFiles();
+    void renderFiles();
   }
   yearSel.addEventListener("change", syncYm);
   monthSel.addEventListener("change", syncYm);
   rebuildMonths();
 
-  function renderFiles() {
+  async function renderFiles() {
     fileList.replaceChildren();
     for (const rec of RECORDS) {
       let sub = "";
       if (rec.id === "firedetector") { const q = quarterWindow(curYm); sub = `${q.label} ${q.year}`; }
       else sub = monthLabel(curYm);
       const btn = h("button", { class: "btn secondary", onClick: () => downloadOne(rec.id) }, "Download");
-      fileList.append(
-        h("div", { class: "exportfile" },
-          h("div", { class: "icon", style: { fontSize: "24px" } }, rec.icon),
-          h("div", { class: "fname" }, rec.title, h("small", {}, `${rec.fileRef} · ${sub}`)),
-          btn)
-      );
+      const tile = h("div", { class: "exportfile" },
+        h("div", { class: "icon", style: { fontSize: "24px" } }, rec.icon),
+        h("div", { class: "fname" }, rec.title, h("small", {}, `${rec.fileRef} · ${sub}`)),
+        btn);
+      // How much of this record is filled in for the selected month, so the
+      // user can see what is still missing before downloading rather than
+      // opening each file to find out.
+      const badge = await statusBadge(rec.id, curYm);
+      if (badge) tile.append(badge);
+      fileList.append(tile);
     }
   }
 
@@ -110,5 +115,5 @@ export async function renderExport(_p: Record<string, string>, mount: HTMLElemen
         "Cumulative files (temp, vibration, busbar, freon, condition monitoring, overhaul) include the whole year up to this month. ICCP and Battery are month-only. Fire detector uses the 3-month quarter window.")
     )
   );
-  renderFiles();
+  await renderFiles();
 }

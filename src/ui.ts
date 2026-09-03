@@ -395,7 +395,7 @@ export function passwordPrompt(opts: {
     const err = h("div", { class: "cf-err" }, "");
     const input = h("input", {
       type: "password", inputmode: "numeric", class: "cf-pass",
-      placeholder: "••••", "aria-label": "Password", autocomplete: "off",
+      placeholder: opts.code, "aria-label": "Password", autocomplete: "off",
     }) as HTMLInputElement;
     const attempt = () => {
       if (input.value === opts.code) return finish(true);
