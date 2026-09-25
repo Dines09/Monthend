@@ -1,6 +1,7 @@
 import "./style.css";
 import { h, initRouter, route, navigate, initTheme } from "./ui";
 import { tapFeedback } from "./feedback";
+import { ICON } from "./icons";
 import { ensureSeeded } from "./seed";
 import { maybeAutoBackup } from "./backup";
 import { renderToday } from "./screens/today";
@@ -22,20 +23,21 @@ const app = document.getElementById("app")!;
 
 function bottomNav(): HTMLElement {
   const item = (r: string, ic: string, label: string) =>
-    h("button", { "data-route": r, onClick: () => { tapFeedback(); navigate(r); } }, h("span", { class: "ic" }, ic), label);
-  // Sliding highlight pill that moves under the active item (macOS-dock feel).
+    h("button", { "data-route": r, "aria-label": label, onClick: () => { tapFeedback(); navigate(r); } },
+      h("span", { class: "ic", html: ic }), h("span", { class: "lab" }, label));
+  // A glass lens that slides under the active item.
   const pill = h("div", { class: "nav-pill" });
   return h(
-    "div",
+    "nav",
     { class: "bottomnav" },
     h(
       "div",
       { class: "dock" },
       pill,
-      item("/", "📋", "Today"),
-      item("/records", "🗂️", "Records"),
-      item("/export", "⬇️", "Export"),
-      item("/settings", "⚙️", "Settings")
+      item("/", ICON.today, "Today"),
+      item("/records", ICON.records, "Records"),
+      item("/export", ICON.export, "Export"),
+      item("/settings", ICON.settings, "Settings")
     )
   );
 }
@@ -88,16 +90,30 @@ function lockZoom() {
   }, { passive: false });
 }
 
-/** Lift the frosted top bar off the content (shadow) once the page scrolls. */
+/**
+ * Scroll-driven chrome:
+ *   • `scrolled` lifts the glass top bar off the content once the page moves.
+ *   • `dock-mini` folds the dock to icons while scrolling down through a long
+ *     list, giving the readings more room; any scroll back up, reaching the
+ *     top, or changing screen brings the labels back.
+ */
 function trackScroll() {
-  let on = false, raf = 0;
+  const root = document.documentElement;
+  let on = false, mini = false, lastY = window.scrollY, raf = 0;
+  const setMini = (v: boolean) => { if (v !== mini) { mini = v; root.classList.toggle("dock-mini", v); } };
   const apply = () => {
     raf = 0;
-    const next = window.scrollY > 4;
-    if (next !== on) { on = next; document.documentElement.classList.toggle("scrolled", on); }
+    const y = window.scrollY;
+    const next = y > 4;
+    if (next !== on) { on = next; root.classList.toggle("scrolled", on); }
+    const dy = y - lastY;
+    if (y < 60) setMini(false);
+    else if (dy > 8) setMini(true);
+    else if (dy < -8) setMini(false);
+    if (Math.abs(dy) > 8 || y < 60) lastY = y;
   };
   window.addEventListener("scroll", () => { if (!raf) raf = requestAnimationFrame(apply); }, { passive: true });
-  window.addEventListener("hashchange", () => requestAnimationFrame(apply));
+  window.addEventListener("hashchange", () => { setMini(false); lastY = 0; requestAnimationFrame(apply); });
 }
 
 async function boot() {

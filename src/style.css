@@ -3,22 +3,28 @@
   /* Inputs / inset wells: a darker glass pressed into the card. */
   --bg2: rgba(6, 22, 34, .55);
   /* Cards are frosted panes over the ambient backdrop rather than flat fills. */
-  --card: rgba(24, 56, 80, .52);
+  --card: rgba(26, 54, 80, .40);
   --card-solid: #11304a;
-  --card2: rgba(36, 76, 104, .5);
-  --line: rgba(130, 196, 240, .15);
-  --line-strong: rgba(130, 196, 240, .28);
-  --glass-hi: rgba(255, 255, 255, .07);
-  --card-shadow: 0 10px 30px -12px rgba(0, 0, 0, .55);
+  --card2: rgba(44, 78, 108, .42);
+  --line: rgba(160, 212, 246, .12);
+  --line-strong: rgba(160, 212, 246, .26);
+  --glass-hi: rgba(255, 255, 255, .10);
+  --card-shadow: 0 12px 32px -14px rgba(0, 0, 0, .6), 0 1px 2px rgba(0, 0, 0, .12);
+  /* Liquid glass: a faint light sheen across the pane, and a specular rim that
+     is brightest where light would catch the edge (top-left, bottom-right). */
+  --sheen: linear-gradient(160deg, rgba(255, 255, 255, .08), rgba(255, 255, 255, .015) 40%, rgba(255, 255, 255, 0) 62%, rgba(255, 255, 255, .03));
+  --rim: linear-gradient(150deg, rgba(255, 255, 255, .45), rgba(255, 255, 255, .09) 26%, rgba(255, 255, 255, .02) 55%, rgba(255, 255, 255, .20));
   /* Floating sheets (dialogs, wheel, toast) — a denser frosted glass. */
-  --sheet: rgba(16, 38, 56, .78);
+  --sheet: rgba(18, 38, 56, .64);
   /* Sticky bars: see-through enough to show content sliding under them. */
-  --bar-glass: rgba(8, 26, 40, .62);
+  --bar-glass: rgba(8, 22, 34, .40);
+  --chip-glass: rgba(255, 255, 255, .09);
   --backdrop:
-    radial-gradient(900px 520px at 8% -8%, rgba(56, 182, 255, .20), transparent 62%),
-    radial-gradient(700px 480px at 108% 12%, rgba(32, 212, 190, .12), transparent 60%),
-    radial-gradient(760px 560px at 50% 112%, rgba(108, 99, 255, .15), transparent 62%),
-    linear-gradient(180deg, #071624 0%, #081a28 55%, #06131e 100%);
+    radial-gradient(70% 42% at 0% 0%, rgba(40, 160, 255, .34), transparent 70%),
+    radial-gradient(55% 36% at 100% 16%, rgba(22, 210, 190, .20), transparent 70%),
+    radial-gradient(60% 40% at 88% 78%, rgba(122, 92, 255, .26), transparent 70%),
+    radial-gradient(50% 36% at 4% 92%, rgba(0, 140, 220, .22), transparent 70%),
+    linear-gradient(180deg, #06121e 0%, #071827 52%, #050f19 100%);
   --accent: #38b6ff;
   --accent-2: #2a7fff;
   --btn-a: #1f8fe0; --btn-b: #1b5fd8;
@@ -39,10 +45,10 @@
      eating the screen before any readings showed. Everything sticky measures
      off this, so the whole stack shrinks with it. */
   --top-h: 44px;
-  --dock-bg: rgba(14, 36, 54, .58);
-  --dock-line: rgba(255, 255, 255, .10);
-  --dock-pill: linear-gradient(160deg, rgba(56, 182, 255, .30), rgba(42, 127, 255, .16));
-  --toast-bg: rgba(10, 44, 66, .80);
+  --dock-bg: rgba(22, 40, 58, .34);
+  --dock-line: rgba(255, 255, 255, .08);
+  --dock-pill: rgba(255, 255, 255, .13);
+  --toast-bg: rgba(22, 42, 60, .62);
   --toast-fg: #eaf6ff;
   --safety: #f5871f;
   --safety-d: rgba(245, 135, 31, .16);
@@ -64,20 +70,24 @@
 :root[data-theme="light"] {
   --bg: #e9f0f6;
   --bg2: rgba(255, 255, 255, .78);
-  --card: rgba(255, 255, 255, .64);
+  --card: rgba(255, 255, 255, .52);
   --card-solid: #ffffff;
-  --card2: rgba(226, 236, 244, .72);
-  --line: rgba(22, 64, 96, .11);
+  --card2: rgba(255, 255, 255, .62);
+  --line: rgba(22, 64, 96, .10);
   --line-strong: rgba(22, 64, 96, .2);
-  --glass-hi: rgba(255, 255, 255, .9);
-  --card-shadow: 0 10px 28px -14px rgba(20, 60, 90, .35);
-  --sheet: rgba(255, 255, 255, .82);
-  --bar-glass: rgba(236, 243, 249, .7);
+  --glass-hi: rgba(255, 255, 255, .95);
+  --card-shadow: 0 10px 26px -14px rgba(30, 70, 110, .30), 0 1px 2px rgba(30, 70, 110, .06);
+  --sheen: linear-gradient(160deg, rgba(255, 255, 255, .55), rgba(255, 255, 255, .12) 42%, rgba(255, 255, 255, 0) 64%, rgba(255, 255, 255, .18));
+  --rim: linear-gradient(150deg, rgba(255, 255, 255, 1), rgba(255, 255, 255, .55) 28%, rgba(255, 255, 255, .22) 58%, rgba(255, 255, 255, .85));
+  --sheet: rgba(250, 252, 255, .70);
+  --bar-glass: rgba(246, 249, 252, .55);
+  --chip-glass: rgba(255, 255, 255, .62);
   --backdrop:
-    radial-gradient(900px 520px at 6% -10%, rgba(56, 170, 255, .26), transparent 60%),
-    radial-gradient(700px 480px at 110% 8%, rgba(40, 210, 190, .18), transparent 60%),
-    radial-gradient(760px 560px at 50% 115%, rgba(130, 120, 255, .18), transparent 62%),
-    linear-gradient(180deg, #eef4f9 0%, #e8f0f6 60%, #e4edf5 100%);
+    radial-gradient(70% 42% at 0% 0%, rgba(80, 170, 255, .42), transparent 70%),
+    radial-gradient(55% 36% at 100% 14%, rgba(50, 215, 195, .28), transparent 70%),
+    radial-gradient(60% 40% at 90% 80%, rgba(160, 130, 255, .30), transparent 70%),
+    radial-gradient(50% 36% at 0% 94%, rgba(90, 190, 255, .28), transparent 70%),
+    linear-gradient(180deg, #f3f7fb 0%, #ebf2f8 60%, #e7eff7 100%);
   --accent: #0f7bc4;
   --accent-2: #1d5fd1;
   --btn-a: #0f7bc4; --btn-b: #1d5fd1;
@@ -93,21 +103,20 @@
   --nav-bg: #ffffff;
   --btn-fg: #ffffff;
   --input-ph: #9fb3c1;
-  --dock-bg: rgba(255, 255, 255, .6);
-  --dock-line: rgba(255, 255, 255, .85);
-  --dock-pill: linear-gradient(160deg, rgba(15, 123, 196, .20), rgba(29, 95, 209, .10));
-  --toast-bg: rgba(20, 48, 63, .84);
-  --toast-fg: #ffffff;
+  --dock-bg: rgba(255, 255, 255, .40);
+  --dock-line: rgba(255, 255, 255, .7);
+  --dock-pill: rgba(20, 60, 100, .08);
+  --toast-bg: rgba(255, 255, 255, .72);
+  --toast-fg: #14303f;
   --safety: #e2720b;
   --safety-d: rgba(226, 114, 11, .12);
   /* accent-d stays a dark blue in light theme too, so keep text light on it */
   --on-accent: #eaf6ff;
   --on-accent-muted: rgba(234, 246, 255, .78);
-  /* The top bar keeps its dark blue gradient in the light theme, so its own
-     text/icons must stay light — var(--text) is near-black here and would be
-     unreadable on that bar. */
-  --top-fg: #f4fbff;
-  --top-fg-muted: rgba(244, 251, 255, .78);
+  /* The top bar is clear frosted glass in the light theme, so it takes dark
+     text like the rest of the page. */
+  --top-fg: #10293a;
+  --top-fg-muted: #5b7385;
   /* Calendar day colours by ship area (light theme): slightly deeper fills with
      white text so the number reads clearly against the coloured circle. */
   --cal-sea: #1f9fd6;    --cal-sea-fg: #ffffff;
@@ -159,44 +168,36 @@ input, textarea, select, [contenteditable="true"] {
 }
 #app { min-height: 100vh; }
 
-/* ---- top bar ---- */
+/* ---- top bar: clear frosted glass, content scrolls under it ---- */
 .topbar {
   position: sticky; top: 0; z-index: 20;
   height: calc(var(--top-h) + env(safe-area-inset-top));
   padding-top: env(safe-area-inset-top);
-  display: flex; align-items: center; gap: 10px;
-  padding-left: 14px; padding-right: 14px;
-  /* Frosted brand bar: content scrolls underneath and shows through, blurred. */
-  background: linear-gradient(180deg, rgba(12, 58, 88, .82), rgba(10, 44, 68, .66));
-  -webkit-backdrop-filter: blur(22px) saturate(1.7);
-  backdrop-filter: blur(22px) saturate(1.7);
-  border-bottom: 1px solid rgba(255, 255, 255, .08);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, .04) inset;
-  transition: box-shadow .25s, background .25s;
-  /* The bar is dark blue in BOTH themes, so everything inside it inherits the
-     light on-bar colour rather than var(--text) (near-black in light mode). */
+  display: flex; align-items: center; gap: 8px;
+  padding-left: 14px; padding-right: 12px;
+  background: var(--bar-glass);
+  -webkit-backdrop-filter: blur(30px) saturate(200%);
+  backdrop-filter: blur(30px) saturate(200%);
+  border-bottom: 1px solid transparent;
+  transition: box-shadow .25s, border-color .25s;
   color: var(--top-fg);
 }
-.topbar h1 { font-size: 16px; margin: 0; font-weight: 700; letter-spacing: .2px; flex: 1; min-width: 0; color: var(--top-fg); line-height: 1.15; }
-.topbar .sub { font-size: 11px; color: var(--top-fg-muted); font-weight: 400; line-height: 1.2; }
-.topbar button.back {
-  background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.1); color: var(--top-fg);
-  width: 32px; height: 32px; border-radius: 10px; font-size: 19px; line-height: 1;
-  flex: 0 0 auto; transition: transform .12s, background .2s;
+.topbar h1 { font-size: 17px; margin: 0; font-weight: 700; letter-spacing: -.2px; flex: 1; min-width: 0; color: var(--top-fg); line-height: 1.15; }
+.topbar .sub { font-size: 11px; color: var(--top-fg-muted); font-weight: 500; letter-spacing: 0; line-height: 1.25; }
+/* Round glass buttons (back, search, theme). */
+.topbar button.back, .topbar button.themebtn {
+  position: relative; flex: 0 0 auto; cursor: pointer;
+  width: 34px; height: 34px; padding: 0; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--chip-glass); border: 1px solid var(--line); color: var(--top-fg);
+  box-shadow: 0 4px 12px -6px rgba(0, 0, 0, .35);
+  transition: transform .15s cubic-bezier(.2,.9,.3,1.4), background .2s;
 }
-.topbar button.themebtn {
-  background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.1); color: var(--top-fg);
-  width: 32px; height: 32px; border-radius: 10px; font-size: 16px; line-height: 1;
-  flex: 0 0 auto; cursor: pointer; transition: transform .12s, background .2s;
-}
-.topbar button.back:active, .topbar button.themebtn:active { transform: scale(.9); background: rgba(255,255,255,.2); }
-/* Once the page has scrolled, the bar lifts off the content with a shadow. */
-html.scrolled .topbar { box-shadow: 0 10px 28px -10px rgba(0, 0, 0, .5); }
-:root[data-theme="light"] .topbar {
-  background: linear-gradient(180deg, rgba(15, 98, 150, .86), rgba(18, 86, 140, .74));
-}
-:root[data-theme="light"] .topbar button.themebtn,
-:root[data-theme="light"] .topbar button.back { background: rgba(255,255,255,.2); }
+.topbar button.back svg, .topbar button.themebtn svg { width: 18px; height: 18px; }
+.topbar button.back svg { width: 20px; height: 20px; margin-left: -1px; }
+.topbar button.back:active, .topbar button.themebtn:active { transform: scale(.88); }
+/* Once the page has scrolled, a hairline separates the bar from the content. */
+html.scrolled .topbar { border-bottom-color: var(--line); box-shadow: 0 10px 26px -18px rgba(0, 0, 0, .55); }
 
 /* ---- scrollable content ---- */
 .screen {
@@ -240,50 +241,71 @@ html.scrolled .topbar { box-shadow: 0 10px 28px -10px rgba(0, 0, 0, .5); }
 .chip.pending { background: rgba(147,179,199,.14); color: var(--muted); }
 .chip.bad { background: rgba(240,85,106,.16); color: var(--bad); }
 
-/* ---- floating dock nav (macOS-style) ---- */
+/* ---- floating glass tab bar ----
+   A capsule of clear glass that hovers over the content, with a glass lens
+   that slides under the active tab. Scrolling down folds it to icons only
+   (html.dock-mini) so long lists get the room; scrolling up brings it back. */
 .bottomnav {
   position: fixed; left: 0; right: 0; z-index: 30;
-  bottom: calc(env(safe-area-inset-bottom) + 12px);
+  bottom: calc(env(safe-area-inset-bottom) + 14px);
   display: flex; justify-content: center;
+  padding: 0 20px;
   pointer-events: none; /* only the dock catches taps */
 }
 .dock {
-  position: relative;
-  pointer-events: auto;
-  display: flex; gap: 4px;
-  padding: 8px 10px;
-  border-radius: 26px;
-  background: var(--dock-bg);
+  position: relative; pointer-events: auto;
+  display: flex; gap: 2px; padding: 5px;
+  width: 100%; max-width: 356px;
+  border-radius: 999px;
+  background-color: var(--dock-bg);
+  background-image: var(--sheen);
   border: 1px solid var(--dock-line);
-  box-shadow: 0 18px 40px -8px rgba(0,0,0,.45), 0 2px 8px rgba(0,0,0,.18), inset 0 1px 0 var(--glass-hi);
-  -webkit-backdrop-filter: blur(26px) saturate(1.8);
-  backdrop-filter: blur(26px) saturate(1.8);
-  max-width: calc(100vw - 16px);
+  -webkit-backdrop-filter: blur(22px) saturate(210%) brightness(1.05);
+  backdrop-filter: blur(22px) saturate(210%) brightness(1.05);
+  box-shadow:
+    0 22px 46px -16px rgba(0, 0, 0, .55),
+    0 6px 14px -6px rgba(0, 0, 0, .25),
+    inset 0 1px 1px rgba(255, 255, 255, .16),
+    inset 0 -1px 1px rgba(255, 255, 255, .05);
+  transition: max-width .38s cubic-bezier(.3,.9,.3,1), padding .3s;
 }
-/* sliding highlight pill behind the active item — anchored at the dock's
-   border origin (0,0); JS translates it to the active button's offset so it
-   sits evenly around the icon + label on all four sides. */
+:root[data-theme="light"] .dock {
+  box-shadow:
+    0 20px 40px -16px rgba(30, 70, 110, .38),
+    0 4px 12px -6px rgba(30, 70, 110, .18),
+    inset 0 1px 1px rgba(255, 255, 255, .9);
+}
+/* The lens — anchored at the dock's origin; JS moves and sizes it onto the
+   active button (moveNavPill in ui.ts). */
 .dock .nav-pill {
-  position: absolute; left: 0; top: 0;
-  border-radius: 18px; background: var(--dock-pill);
-  border: 1px solid rgba(120, 200, 255, .22);
-  box-shadow: 0 4px 14px -4px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,.12);
-  opacity: 0; z-index: 0;
-  transition: transform .32s cubic-bezier(.22,.9,.3,1), width .32s cubic-bezier(.22,.9,.3,1), opacity .2s;
+  position: absolute; left: 0; top: 0; z-index: 0;
+  border-radius: 999px; background: var(--dock-pill);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, .22), inset 0 -1px 1px rgba(255, 255, 255, .06), 0 6px 16px -8px rgba(0, 0, 0, .45);
+  opacity: 0;
+  transition: transform .42s cubic-bezier(.3,1.25,.4,1), width .38s cubic-bezier(.3,.9,.3,1), height .3s, opacity .2s;
+}
+:root[data-theme="light"] .dock .nav-pill {
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, .9), 0 4px 12px -6px rgba(30, 70, 110, .3);
 }
 .bottomnav button {
-  position: relative; z-index: 1;
-  min-width: 72px; background: none; border: none; color: var(--muted);
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
-  font-size: 11px; font-weight: 600; padding: 9px 8px 8px;
-  border-radius: 16px;
-  transition: color .2s, transform .12s;
+  position: relative; z-index: 1; flex: 1 1 0; min-width: 0;
+  height: 54px; padding: 0; border: none; background: none; border-radius: 999px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  color: var(--muted); font-size: 10.5px; font-weight: 600; letter-spacing: .1px;
+  cursor: pointer; transition: color .25s, height .3s, gap .3s;
 }
-.bottomnav button:active { transform: scale(.9); }
-.bottomnav button .ic { font-size: 23px; line-height: 1; }
+.bottomnav button .ic { display: block; width: 24px; height: 24px; transition: transform .35s cubic-bezier(.2,.9,.3,1.4); }
+.bottomnav button .ic svg { display: block; width: 24px; height: 24px; transition: fill .25s; }
+.bottomnav button .lab { display: block; max-height: 14px; line-height: 14px; overflow: hidden; transition: max-height .3s, opacity .2s; }
+.bottomnav button:active .ic { transform: scale(.84); }
 .bottomnav button.active { color: var(--accent); }
-.bottomnav button .ic { transition: transform .3s cubic-bezier(.2,.9,.3,1.3); }
-.bottomnav button.active .ic { transform: translateY(-1px) scale(1.08); }
+.bottomnav button.active .ic svg { fill: color-mix(in srgb, currentColor 20%, transparent); }
+html.dock-mini .dock { max-width: 236px; padding: 4px; }
+html.dock-mini .bottomnav button { height: 44px; gap: 0; }
+html.dock-mini .bottomnav button .lab { max-height: 0; opacity: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .dock, .dock .nav-pill, .bottomnav button, .bottomnav button .lab { transition: none; }
+}
 
 input.locked, textarea.locked {
   opacity: .75; color: var(--muted); cursor: not-allowed;
@@ -603,14 +625,34 @@ mark.hl {
 .list-empty { text-align: center; color: var(--muted); padding: 40px 20px; }
 .list-empty .big { font-size: 40px; margin-bottom: 8px; }
 
+/* Export tile: icon · name, file ref and progress · round download button.
+   Each part keeps its own column, so nothing can sit on top of the button. */
 .exportfile {
-  display: flex; align-items: center; gap: 12px; padding: 13px 14px;
-  border: 1px solid var(--line); border-radius: 16px; margin-bottom: 8px; background: var(--card);
-  box-shadow: inset 0 1px 0 var(--glass-hi);
+  display: flex; align-items: center; gap: 12px; padding: 12px;
+  border: 1px solid var(--line); border-radius: 22px; margin-bottom: 10px; background: var(--card);
+  box-shadow: var(--card-shadow);
 }
-.exportfile .fname { flex: 1; font-size: 14px; min-width: 0; }
-.exportfile .fname small { display: block; color: var(--muted); font-size: 12px; }
-.exportfile button { width: auto; padding: 9px 14px; font-size: 14px; border-radius: 10px; }
+.exportfile .icon {
+  font-size: 22px; width: 44px; height: 44px; flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 14px; background: var(--icon-bg);
+  border: 1px solid var(--line); box-shadow: inset 0 1px 0 var(--glass-hi);
+}
+.exportfile .fname { flex: 1; min-width: 0; }
+.exportfile .ftitle { font-size: 15px; font-weight: 700; letter-spacing: -.1px; line-height: 1.25; }
+.exportfile .fname small {
+  display: block; color: var(--muted); font-size: 12px; margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.dl-btn {
+  flex: 0 0 auto; width: 42px; height: 42px; padding: 0; border: none; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+  color: #fff; background: linear-gradient(145deg, var(--btn-a), var(--btn-b));
+  box-shadow: 0 8px 18px -8px var(--accent-glow), inset 0 1px 1px rgba(255, 255, 255, .35);
+  transition: transform .15s cubic-bezier(.2,.9,.3,1.4), filter .15s;
+}
+.dl-btn svg { width: 20px; height: 20px; stroke-width: 2.1; }
+.dl-btn:active { transform: scale(.88); filter: brightness(.95); }
 
 /* animated segmented control — a thumb slides under the active option */
 .seg {
@@ -1368,21 +1410,23 @@ label.field.invalid .lab { color: var(--bad); }
 /* Strainer inspection dates — two side-by-side pickers with fixed labels. */
 .strainer-date { width: 100%; }
 
-/* Completion chip in the top-right of a record / export tile. Absolute so it
-   sits in the corner without reflowing the row, and the tile gets padding on
-   that side so a long title can never run underneath it. */
-.exportfile, .rec-card { position: relative; }
-.exportfile { padding-right: 14px; }
-.rec-status {
-  position: absolute; top: 6px; right: 10px; z-index: 1;
-  font-size: 9.5px; font-weight: 800; letter-spacing: .4px; text-transform: uppercase;
-  padding: 2px 7px; border-radius: 999px; white-space: nowrap; pointer-events: none;
+/* Completion line under a record / export tile's title: slim bar + words. */
+.meter { display: flex; align-items: center; gap: 8px; margin-top: 7px; min-width: 0; }
+.meter-track {
+  flex: 0 1 96px; min-width: 40px; height: 5px; border-radius: 999px;
+  background: var(--track); overflow: hidden;
 }
-.rec-status.done { color: var(--good); background: rgba(53,192,122,.15); border: 1px solid rgba(53,192,122,.5); }
-.rec-status.partial { color: var(--warn); background: rgba(240,180,41,.13); border: 1px solid rgba(240,180,41,.45); }
-/* Keep the tile's own text clear of the chip. */
-.exportfile .fname { padding-top: 6px; }
-.rec-card .card-row .body .title { padding-right: 74px; }
+.meter-track i {
+  display: block; height: 100%; border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent-2), var(--accent));
+  box-shadow: 0 0 8px -1px var(--accent-glow);
+}
+.meter.done .meter-track i { background: var(--good); box-shadow: 0 0 8px -1px rgba(53, 192, 122, .6); }
+.meter-txt {
+  flex: 0 1 auto; min-width: 0; font-size: 11px; font-weight: 700; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.meter.done .meter-txt { color: var(--good); }
 
 /* ================================================================
    v1.16 — components added with the glass refresh
@@ -1496,3 +1540,94 @@ label.field.invalid .lab { color: var(--bad); }
 .audit-what small { display: block; font-size: 11px; color: var(--muted); font-weight: 600; margin-top: 1px; }
 .audit-val { flex: 0 0 auto; font-size: 13px; font-weight: 800; color: var(--warn); }
 .audit-more { font-size: 12px; color: var(--muted); text-align: center; padding-top: 2px; }
+
+/* ================================================================
+   v1.17 — Liquid glass
+   Every pane is clear glass over the colour field behind the app: a faint
+   sheen across the surface, a thin specular rim that catches light on the
+   top-left and bottom-right edges, and a soft shadow lifting it off the page.
+   Floating layers (bars, dock, sheets, toast) also blur what passes beneath.
+   ================================================================ */
+
+/* Surface sheen. `background-color` stays with each component's own rule;
+   components that paint a gradient of their own (.card.accent, .audit.ok,
+   .det.tested …) use more specific selectors and keep it. */
+.card, .exportfile, .toggle-row, .modetile, .mrow:not(.phase-row), .det,
+.satgrid, .cal, .batt-shell, .audit, .fire-hero {
+  background-image: var(--sheen);
+}
+
+/* The specular rim: a 1px gradient ring laid over the border. A mask cuts the
+   middle out so only the edge shows; it never takes pointer events. */
+.card, .exportfile, .toggle-row, .modetile, .mrow:not(.phase-row), .det,
+.satgrid, .cal, .audit, .confirm-card, .wheel-sheet, .reminder-card,
+.btn.secondary, .ph-month, .est-row, .audit-row { position: relative; }
+.card::before, .exportfile::before, .toggle-row::before, .modetile::before,
+.mrow:not(.phase-row)::before, .det::before, .satgrid::before, .cal::before,
+.batt-shell::before, .audit::before, .confirm-card::before, .wheel-sheet::before,
+.reminder-card::before, .dock::before, .toast::before, .updatebar::before,
+.btn.secondary::before, .ph-month::before, .est-row::before, .audit-row::before,
+.topbar button.back::before, .topbar button.themebtn::before {
+  content: ""; position: absolute; inset: -1px; z-index: 1;
+  border-radius: inherit; padding: 1px; pointer-events: none;
+  background: var(--rim);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+/* Rounder, softer panes. */
+.card, .toggle-row, .modetile, .batt-shell, .satgrid, .cal, .audit { border-radius: 22px; }
+.mrow, .det { border-radius: 16px; }
+.card.group { border-radius: 24px; }
+
+/* Floating sheets: clearer glass with a stronger blur. */
+.confirm-card, .wheel-sheet, .reminder-card {
+  background-image: var(--sheen);
+  -webkit-backdrop-filter: blur(40px) saturate(200%); backdrop-filter: blur(40px) saturate(200%);
+  border-radius: 28px;
+}
+.updatebar { -webkit-backdrop-filter: blur(34px) saturate(200%); backdrop-filter: blur(34px) saturate(200%); border-radius: 22px; }
+
+/* Toast: a glass capsule that takes the theme's text colour. */
+.toast {
+  border: 1px solid var(--line);
+  background-image: var(--sheen);
+  -webkit-backdrop-filter: blur(30px) saturate(200%); backdrop-filter: blur(30px) saturate(200%);
+  box-shadow: 0 16px 34px -12px rgba(0, 0, 0, .5);
+}
+:root[data-theme="light"] .toast { box-shadow: 0 14px 30px -12px rgba(30, 70, 110, .35); }
+
+/* Buttons: capsules. Primary keeps its colour; secondary is clear glass. */
+.btn { border-radius: 999px; }
+.btn.secondary {
+  background: var(--chip-glass); background-image: var(--sheen);
+  border: 1px solid var(--line);
+  box-shadow: 0 6px 16px -10px rgba(0, 0, 0, .4);
+}
+.btn .btn-ic { display: inline-flex; }
+.btn .btn-ic svg { width: 20px; height: 20px; stroke-width: 2.1; }
+.export-all { margin-top: 2px; }
+
+/* Header chips on the frosted period strip. */
+.ph-month, .satchip { background: var(--chip-glass); }
+
+/* Any remaining sticky tool strip is frosted too, never a flat fill. */
+.toolbar {
+  background: var(--bar-glass);
+  -webkit-backdrop-filter: blur(26px) saturate(190%); backdrop-filter: blur(26px) saturate(190%);
+  margin-left: -14px; margin-right: -14px; padding-left: 14px; padding-right: 14px;
+}
+
+/* Record cards: the progress line lives in the text column now. */
+.rec-card .card-row .desc { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Form fields grouped on a glass card (Settings). */
+.card.fields { padding: 14px 14px 2px; }
+.card.fields > label.field { margin-bottom: 12px; }
+
+/* A scrolling sheet can't carry the rim pseudo-element (it would scroll with
+   the content), so its edge light comes from an inset shadow instead. */
+.est-card::before { display: none; }
+.est-card { box-shadow: 0 30px 70px -10px rgba(0,0,0,.55), inset 0 1px 1px rgba(255,255,255,.22), inset 0 0 0 1px rgba(255,255,255,.05); }
+/* Dialog buttons stay on one line ("Fill 547 readings"). */
+.confirm-card .cf-actions .btn { padding: 13px 10px; font-size: 15px; white-space: nowrap; }

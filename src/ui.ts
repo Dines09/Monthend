@@ -1,5 +1,6 @@
 // Tiny DOM helpers + router + toast.
 import { hapticsEnabled } from "./feedback";
+import { ICON } from "./icons";
 
 export function h<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -108,22 +109,33 @@ function updateNav(path: string) {
 }
 
 // Slide the highlight pill under the active dock item.
-function moveNavPill(btn: HTMLElement | null) {
+let navActive: HTMLElement | null = null;
+let navObserver: ResizeObserver | null = null;
+function placeNavPill() {
   const pill = document.querySelector<HTMLElement>(".nav-pill");
+  const btn = navActive;
+  if (!pill) return;
+  if (!btn || !btn.offsetWidth) { pill.style.opacity = btn ? pill.style.opacity : "0"; return; }
+  pill.style.opacity = "1";
+  pill.style.width = `${btn.offsetWidth}px`;
+  pill.style.height = `${btn.offsetHeight}px`;
+  // Position exactly over the active button box (offsetLeft/Top are relative
+  // to the dock, so the highlight sits evenly around the icon + label).
+  pill.style.transform = `translate(${btn.offsetLeft}px, ${btn.offsetTop}px)`;
+}
+function moveNavPill(btn: HTMLElement | null) {
   const dock = document.querySelector<HTMLElement>(".dock");
-  if (!pill || !dock) return;
-  if (!btn) { pill.style.opacity = "0"; return; }
-  const place = () => {
-    pill.style.opacity = "1";
-    pill.style.width = `${btn.offsetWidth}px`;
-    pill.style.height = `${btn.offsetHeight}px`;
-    // Position exactly over the active button box (offsetLeft/Top are relative
-    // to the dock, so the highlight sits evenly around the icon + label).
-    pill.style.transform = `translate(${btn.offsetLeft}px, ${btn.offsetTop}px)`;
-  };
+  if (!dock) return;
+  navActive = btn;
+  // The dock shrinks to icons only while scrolling down; the pill has to
+  // follow the button as it resizes, not just when the route changes.
+  if (!navObserver && "ResizeObserver" in window) {
+    navObserver = new ResizeObserver(() => placeNavPill());
+    navObserver.observe(dock);
+  }
   // Wait a frame if layout isn't measured yet (first paint).
-  if (btn.offsetWidth) place();
-  else requestAnimationFrame(place);
+  if (btn?.offsetWidth) placeNavPill();
+  else requestAnimationFrame(placeNavPill);
 }
 
 // ---- theme (light / dark) ----
@@ -138,7 +150,8 @@ export function applyTheme(t: Theme) {
   document.documentElement.setAttribute("data-theme", t);
   localStorage.setItem(THEME_KEY, t);
   const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
-  if (meta) meta.content = t === "light" ? "#0f5c8a" : "#0f3d5c";
+  // Matches the glass top bar, so the phone status bar reads as part of it.
+  if (meta) meta.content = t === "light" ? "#eef4fa" : "#0b1d2c";
 }
 
 export function initTheme() {
@@ -153,10 +166,10 @@ export function themeToggle(): HTMLButtonElement {
     onClick: () => {
       const next: Theme = getTheme() === "dark" ? "light" : "dark";
       applyTheme(next);
-      btn.textContent = next === "dark" ? "☀️" : "🌙";
+      btn.innerHTML = next === "dark" ? ICON.sun : ICON.moon;
     },
   });
-  btn.textContent = getTheme() === "dark" ? "☀️" : "🌙";
+  btn.innerHTML = getTheme() === "dark" ? ICON.sun : ICON.moon;
   return btn;
 }
 
@@ -167,15 +180,21 @@ export function searchButton(): HTMLButtonElement {
     title: "Search everything",
     "aria-label": "Search everything",
     onClick: () => navigate("/search"),
-  }, "🔍");
+    html: ICON.search,
+  });
   return btn;
+}
+
+/** Round glass back button for the top bar. */
+export function backButton(onClick: () => void): HTMLButtonElement {
+  return h("button", { class: "back", "aria-label": "Back", title: "Back", html: ICON.back, onClick });
 }
 
 export function topbar(title: string, sub?: string, back?: string): HTMLElement {
   return h(
     "div",
     { class: "topbar" },
-    back ? h("button", { class: "back", onClick: () => navigate(back) }, "‹") : null,
+    back ? backButton(() => navigate(back)) : null,
     h("h1", {}, title, sub ? h("div", { class: "sub" }, sub) : null),
     searchButton(),
     themeToggle()

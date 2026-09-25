@@ -4,7 +4,7 @@
 // they can type "6314", "galley", "12 KW" or "GMDSS" and jump straight to the
 // thing they meant, instead of having to remember which of nine screens holds
 // it. Results are grouped by record and each row navigates to its screen.
-import { h, navigate } from "../ui";
+import { h, navigate, backButton } from "../ui";
 import { db } from "../db";
 import { masters } from "../seed";
 import { currentFireSession, AREA_LABEL, KIND_META } from "../fireSchedule";
@@ -170,7 +170,7 @@ export async function renderUniversalSearch(_p: Record<string, string>, mount: H
 
   mount.append(
     h("div", { class: "topbar" },
-      h("button", { class: "back", onClick: () => history.back() }, "‹"),
+      backButton(() => history.back()),
       h("h1", {}, "Search")),
     screenWrap(
       h("div", { class: "searchbar", style: { marginBottom: "6px" } }, input),

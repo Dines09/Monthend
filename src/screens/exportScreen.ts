@@ -1,7 +1,8 @@
 import JSZip from "jszip";
 import { h, topbar, screen, toast, navigate } from "../ui";
 import { auditMonth } from "../audit";
-import { statusBadge } from "../status";
+import { statusMeter } from "../status";
+import { ICON } from "../icons";
 import { RECORDS } from "../records";
 import { GENERATORS, type ExportResult } from "../export/generate";
 import { defaultReportYm, monthLabel, MONTHS_FULL, quarterWindow, ym as ymOf } from "../util";
@@ -82,16 +83,21 @@ export async function renderExport(_p: Record<string, string>, mount: HTMLElemen
       let sub = "";
       if (rec.id === "firedetector") { const q = quarterWindow(curYm); sub = `${q.label} ${q.year}`; }
       else sub = monthLabel(curYm);
-      const btn = h("button", { class: "btn secondary", onClick: () => downloadOne(rec.id) }, "Download");
-      const tile = h("div", { class: "exportfile" },
-        h("div", { class: "icon", style: { fontSize: "24px" } }, rec.icon),
-        h("div", { class: "fname" }, rec.title, h("small", {}, `${rec.fileRef} · ${sub}`)),
-        btn);
       // How much of this record is filled in for the selected month, so the
       // user can see what is still missing before downloading rather than
-      // opening each file to find out.
-      const badge = await statusBadge(rec.id, curYm);
-      if (badge) tile.append(badge);
+      // opening each file to find out. It sits under the name, never over the
+      // download button.
+      const meter = await statusMeter(rec.id, curYm);
+      const tile = h("div", { class: "exportfile" },
+        h("div", { class: "icon" }, rec.icon),
+        h("div", { class: "fname" },
+          h("div", { class: "ftitle" }, rec.title),
+          h("small", {}, `${rec.fileRef} · ${sub}`),
+          meter),
+        h("button", {
+          type: "button", class: "dl-btn", title: "Download", "aria-label": `Download ${rec.title}`,
+          html: ICON.download, onClick: () => downloadOne(rec.id),
+        }));
       fileList.append(tile);
     }
   }
@@ -108,8 +114,8 @@ export async function renderExport(_p: Record<string, string>, mount: HTMLElemen
     }
   }
 
-  const exportAllBtn = h("button", { class: "btn", onClick: exportAll },
-    h("span", { class: "biglabel" }, "⬇ Export All (ZIP)"));
+  const exportAllBtn = h("button", { class: "btn export-all", onClick: exportAll },
+    h("span", { class: "btn-ic", html: ICON.download }), h("span", { class: "biglabel" }, "Export All (ZIP)"));
 
   async function exportAll() {
     exportAllBtn.setAttribute("disabled", "true");

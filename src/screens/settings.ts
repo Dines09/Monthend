@@ -22,15 +22,17 @@ export async function renderSettings(_p: Record<string, string>, mount: HTMLElem
     topbar("Settings", "App configuration"),
     screen(
       h("h2", { style: { marginLeft: 0 } }, "Vessel"),
-      field("Vessel name (headers)", txt("vessel", vessel)),
-      field("Vessel name (M.T. …)", txt("vesselMT", vesselMT)),
-      field("Checked / Prepared by", txt("checkedBy", checkedBy)),
+      h("div", { class: "card fields" },
+        field("Vessel name (headers)", txt("vessel", vessel)),
+        field("Vessel name (M.T. …)", txt("vesselMT", vesselMT)),
+        field("Checked / Prepared by", txt("checkedBy", checkedBy))),
 
       h("h2", { style: { marginLeft: 0 } }, "Signatories"),
       h("p", { class: "hint", style: { margin: "0 0 10px" } },
         "These names are printed in the signature blocks of the reports that carry them — the motor temp and overhaul sheets, and the Chief Engineer line on the ICCP log. Change them here when the officers change and every export follows."),
-      field("Chief Engineer", txt("chiefEngineer", chiefEngineer)),
-      field("ATO / Electrical Officer", txt("ato", ato)),
+      h("div", { class: "card fields" },
+        field("Chief Engineer", txt("chiefEngineer", chiefEngineer)),
+        field("ATO / Electrical Officer", txt("ato", ato))),
 
       h("h2", { style: { marginLeft: 0 } }, "Feedback"),
       h("label", { class: "toggle-row" },

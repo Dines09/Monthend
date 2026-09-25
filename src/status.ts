@@ -98,14 +98,14 @@ function summarize(count: number, total: number, unit: string): RecStatus {
 }
 
 /**
- * The small "Complete" / "72%" chip shown in the corner of a record tile.
+ * How far along a record is for the month, shown as a line under the tile's
+ * title: a slim progress bar with "72% · 18/25 motors", or "Complete".
  *
- * Records with nothing entered yet stay unlabelled — a row of "0%" chips on a
- * fresh month is noise, not information. Anything started shows how far along
- * it is, and a finished record says so in words rather than "100%", which is
- * the thing the user is actually scanning the list for.
+ * It sits in the text column rather than pinned to a corner, so it can never
+ * run into the tile's own buttons. Records with nothing entered yet get no line
+ * at all — a column of empty bars on a fresh month is noise, not information.
  */
-export async function statusBadge(recId: string, ymStr: string): Promise<HTMLElement | null> {
+export async function statusMeter(recId: string, ymStr: string): Promise<HTMLElement | null> {
   const fn = STATUS_FNS[recId];
   if (!fn) return null;
   let st: RecStatus;
@@ -116,8 +116,8 @@ export async function statusBadge(recId: string, ymStr: string): Promise<HTMLEle
   }
   if (st.state === "empty") return null;
   const pct = pctOf(st);
-  return h("span", {
-    class: `rec-status ${st.state === "done" ? "done" : "partial"}`,
-    title: st.label,
-  }, st.state === "done" ? "✓ Complete" : `${pct}%`);
+  const done = st.state === "done";
+  return h("div", { class: `meter ${done ? "done" : "partial"}`, title: st.label },
+    h("span", { class: "meter-track" }, h("i", { style: { width: `${done ? 100 : Math.max(pct, 4)}%` } })),
+    h("span", { class: "meter-txt" }, done ? "Complete" : `${pct}% · ${st.label}`));
 }

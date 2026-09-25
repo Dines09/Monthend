@@ -1,6 +1,6 @@
 import { h, topbar, screen, navigate } from "../ui";
 import { RECORDS, type Cadence } from "../records";
-import { statusBadge } from "../status";
+import { statusMeter } from "../status";
 import { defaultReportYm, monthLabel } from "../util";
 
 const cadenceLabel: Record<Cadence, string> = {
@@ -18,11 +18,10 @@ export async function renderRecords(_p: Record<string, string>, mount: HTMLEleme
   const curYm = defaultReportYm();
 
   const cards = await Promise.all(RECORDS.map(async (r) => {
-    const badge = await statusBadge(r.id, curYm);
+    const meter = await statusMeter(r.id, curYm);
     return h(
       "div",
       { class: "card tap rec-card", onClick: () => navigate(r.route) },
-      badge,
       h(
         "div",
         { class: "card-row" },
@@ -31,7 +30,8 @@ export async function renderRecords(_p: Record<string, string>, mount: HTMLEleme
           "div",
           { class: "body" },
           h("div", { class: "title" }, r.title),
-          h("div", { class: "desc" }, `${r.fileRef} · ${cadenceLabel[r.cadence]}`)
+          h("div", { class: "desc" }, `${r.fileRef} · ${cadenceLabel[r.cadence]}`),
+          meter
         ),
         h("div", { class: "chev" }, "›")
       )
