@@ -32,7 +32,7 @@ export async function renderSettings(_p: Record<string, string>, mount: HTMLElem
         "These names are printed in the signature blocks of the reports that carry them — the motor temp and overhaul sheets, and the Chief Engineer line on the ICCP log. Change them here when the officers change and every export follows."),
       h("div", { class: "card fields" },
         field("Chief Engineer", txt("chiefEngineer", chiefEngineer)),
-        field("ATO / Electrical Officer", txt("ato", ato))),
+        field("ETO / Electro Technical Officer", txt("ato", ato))),
 
       h("h2", { style: { marginLeft: 0 } }, "Feedback"),
       h("label", { class: "toggle-row" },

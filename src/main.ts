@@ -4,6 +4,7 @@ import { tapFeedback } from "./feedback";
 import { ICON } from "./icons";
 import { ensureSeeded } from "./seed";
 import { maybeAutoBackup } from "./backup";
+import { loadFireEdits } from "./fireEdits";
 import { renderToday } from "./screens/today";
 import { renderRecords } from "./screens/records";
 import { renderExport } from "./screens/exportScreen";
@@ -130,6 +131,8 @@ async function boot() {
   );
 
   await ensureSeeded();
+  // Corrected detector numbers / locations, before any screen reads the list.
+  await loadFireEdits();
 
   app.replaceChildren();
   const mount = h("div", { id: "view" });

@@ -19,6 +19,12 @@
   /* Sticky bars: see-through enough to show content sliding under them. */
   --bar-glass: rgba(8, 22, 34, .40);
   --chip-glass: rgba(255, 255, 255, .09);
+  /* Exactly the phone status-bar colour (theme-color meta): the top bar starts
+     solid in this colour and melts into glass, so there is no seam between the
+     phone's bar and the app's. */
+  --status-bg: #0a1e30;
+  --top-blur: blur(24px) saturate(190%);
+  --dock-blur: blur(34px) saturate(210%) brightness(1.05);
   --backdrop:
     radial-gradient(70% 42% at 0% 0%, rgba(40, 160, 255, .34), transparent 70%),
     radial-gradient(55% 36% at 100% 16%, rgba(22, 210, 190, .20), transparent 70%),
@@ -45,7 +51,7 @@
      eating the screen before any readings showed. Everything sticky measures
      off this, so the whole stack shrinks with it. */
   --top-h: 44px;
-  --dock-bg: rgba(22, 40, 58, .34);
+  --dock-bg: rgba(22, 40, 58, .28);
   --dock-line: rgba(255, 255, 255, .08);
   --dock-pill: rgba(255, 255, 255, .13);
   --toast-bg: rgba(22, 42, 60, .62);
@@ -80,8 +86,11 @@
   --sheen: linear-gradient(160deg, rgba(255, 255, 255, .55), rgba(255, 255, 255, .12) 42%, rgba(255, 255, 255, 0) 64%, rgba(255, 255, 255, .18));
   --rim: linear-gradient(150deg, rgba(255, 255, 255, 1), rgba(255, 255, 255, .55) 28%, rgba(255, 255, 255, .22) 58%, rgba(255, 255, 255, .85));
   --sheet: rgba(250, 252, 255, .70);
-  --bar-glass: rgba(246, 249, 252, .55);
-  --chip-glass: rgba(255, 255, 255, .62);
+  --bar-glass: rgba(246, 249, 252, .36);
+  --chip-glass: rgba(255, 255, 255, .55);
+  --status-bg: #eaf2fa;
+  --top-blur: blur(20px) saturate(180%);
+  --dock-blur: blur(38px) saturate(240%) brightness(1.08);
   --backdrop:
     radial-gradient(70% 42% at 0% 0%, rgba(80, 170, 255, .42), transparent 70%),
     radial-gradient(55% 36% at 100% 14%, rgba(50, 215, 195, .28), transparent 70%),
@@ -103,9 +112,9 @@
   --nav-bg: #ffffff;
   --btn-fg: #ffffff;
   --input-ph: #9fb3c1;
-  --dock-bg: rgba(255, 255, 255, .40);
-  --dock-line: rgba(255, 255, 255, .7);
-  --dock-pill: rgba(20, 60, 100, .08);
+  --dock-bg: rgba(255, 255, 255, .20);
+  --dock-line: rgba(255, 255, 255, .75);
+  --dock-pill: rgba(255, 255, 255, .62);
   --toast-bg: rgba(255, 255, 255, .72);
   --toast-fg: #14303f;
   --safety: #e2720b;
@@ -175,9 +184,13 @@ input, textarea, select, [contenteditable="true"] {
   padding-top: env(safe-area-inset-top);
   display: flex; align-items: center; gap: 8px;
   padding-left: 14px; padding-right: 12px;
-  background: var(--bar-glass);
-  -webkit-backdrop-filter: blur(30px) saturate(200%);
-  backdrop-filter: blur(30px) saturate(200%);
+  /* Solid status-bar colour at the very top, melting into clear glass. */
+  background: linear-gradient(180deg,
+    var(--status-bg) 0,
+    color-mix(in srgb, var(--status-bg) 70%, transparent) calc(env(safe-area-inset-top) + 8px),
+    var(--bar-glass) 100%);
+  -webkit-backdrop-filter: var(--top-blur);
+  backdrop-filter: var(--top-blur);
   border-bottom: 1px solid transparent;
   transition: box-shadow .25s, border-color .25s;
   color: var(--top-fg);
@@ -243,8 +256,12 @@ html.scrolled .topbar { border-bottom-color: var(--line); box-shadow: 0 10px 26p
 
 /* ---- floating glass tab bar ----
    A capsule of clear glass that hovers over the content, with a glass lens
-   that slides under the active tab. Scrolling down folds it to icons only
-   (html.dock-mini) so long lists get the room; scrolling up brings it back. */
+   under the active tab. Scrolling down folds it to icons only
+   (html.dock-mini); scrolling up brings the labels back.
+
+   Everything that changes size — the dock, the buttons, the lens — moves on
+   ONE duration and ONE curve (--dock-t / --dock-e), and the lens is laid out in
+   CSS relative to the dock, so the whole bar folds as a single piece. */
 .bottomnav {
   position: fixed; left: 0; right: 0; z-index: 30;
   bottom: calc(env(safe-area-inset-bottom) + 14px);
@@ -253,58 +270,92 @@ html.scrolled .topbar { border-bottom-color: var(--line); box-shadow: 0 10px 26p
   pointer-events: none; /* only the dock catches taps */
 }
 .dock {
+  --dock-t: .36s;
+  --dock-e: cubic-bezier(.32, .72, .24, 1);
+  --dock-pad: 5px;
+  --dock-gap: 2px;
   position: relative; pointer-events: auto;
-  display: flex; gap: 2px; padding: 5px;
+  display: flex; gap: var(--dock-gap); padding: var(--dock-pad);
   width: 100%; max-width: 356px;
   border-radius: 999px;
   background-color: var(--dock-bg);
   background-image: var(--sheen);
   border: 1px solid var(--dock-line);
-  -webkit-backdrop-filter: blur(22px) saturate(210%) brightness(1.05);
-  backdrop-filter: blur(22px) saturate(210%) brightness(1.05);
+  -webkit-backdrop-filter: var(--dock-blur);
+  backdrop-filter: var(--dock-blur);
   box-shadow:
     0 22px 46px -16px rgba(0, 0, 0, .55),
     0 6px 14px -6px rgba(0, 0, 0, .25),
     inset 0 1px 1px rgba(255, 255, 255, .16),
     inset 0 -1px 1px rgba(255, 255, 255, .05);
-  transition: max-width .38s cubic-bezier(.3,.9,.3,1), padding .3s;
+  transition: max-width var(--dock-t) var(--dock-e);
 }
 :root[data-theme="light"] .dock {
   box-shadow:
-    0 20px 40px -16px rgba(30, 70, 110, .38),
-    0 4px 12px -6px rgba(30, 70, 110, .18),
-    inset 0 1px 1px rgba(255, 255, 255, .9);
+    0 22px 44px -16px rgba(30, 70, 110, .34),
+    0 4px 12px -6px rgba(30, 70, 110, .16),
+    inset 0 1px 1px rgba(255, 255, 255, .95),
+    inset 0 -1px 1px rgba(255, 255, 255, .4);
 }
-/* The lens — anchored at the dock's origin; JS moves and sizes it onto the
-   active button (moveNavPill in ui.ts). */
+/* The lens: a quarter of the dock's inner width, shifted one lens-width (plus
+   the gap) per tab index. Percentages track the dock live, so there is nothing
+   to re-measure while it folds. */
 .dock .nav-pill {
-  position: absolute; left: 0; top: 0; z-index: 0;
+  position: absolute; z-index: 0;
+  left: var(--dock-pad); top: var(--dock-pad); bottom: var(--dock-pad);
+  width: calc((100% - 2 * var(--dock-pad) - 3 * var(--dock-gap)) / 4);
+  transform: translateX(calc(var(--i, 0) * (100% + var(--dock-gap))));
   border-radius: 999px; background: var(--dock-pill);
   box-shadow: inset 0 1px 1px rgba(255, 255, 255, .22), inset 0 -1px 1px rgba(255, 255, 255, .06), 0 6px 16px -8px rgba(0, 0, 0, .45);
   opacity: 0;
-  transition: transform .42s cubic-bezier(.3,1.25,.4,1), width .38s cubic-bezier(.3,.9,.3,1), height .3s, opacity .2s;
+  transition: opacity .2s;
 }
+.dock.has-active .nav-pill { opacity: 1; }
+/* Only the sideways slide between tabs is animated (with a little spring);
+   size follows the dock directly. */
+.dock.pill-ready .nav-pill { transition: transform .45s cubic-bezier(.3, 1.3, .4, 1), opacity .2s; }
 :root[data-theme="light"] .dock .nav-pill {
-  box-shadow: inset 0 1px 1px rgba(255, 255, 255, .9), 0 4px 12px -6px rgba(30, 70, 110, .3);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, .95), 0 4px 12px -6px rgba(30, 70, 110, .28);
 }
 .bottomnav button {
   position: relative; z-index: 1; flex: 1 1 0; min-width: 0;
   height: 54px; padding: 0; border: none; background: none; border-radius: 999px;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
   color: var(--muted); font-size: 10.5px; font-weight: 600; letter-spacing: .1px;
-  cursor: pointer; transition: color .25s, height .3s, gap .3s;
+  cursor: pointer;
+  transition: color .25s, height var(--dock-t) var(--dock-e), gap var(--dock-t) var(--dock-e);
 }
-.bottomnav button .ic { display: block; width: 24px; height: 24px; transition: transform .35s cubic-bezier(.2,.9,.3,1.4); }
-.bottomnav button .ic svg { display: block; width: 24px; height: 24px; transition: fill .25s; }
-.bottomnav button .lab { display: block; max-height: 14px; line-height: 14px; overflow: hidden; transition: max-height .3s, opacity .2s; }
+/* Each tab keeps its own colour, like app icons on a home screen. */
+.bottomnav button[data-route="/"]         { --tc: #3aa8ff; --tc2: #6f7dff; }
+.bottomnav button[data-route="/records"]  { --tc: #ffb020; --tc2: #ff7a2e; }
+.bottomnav button[data-route="/export"]   { --tc: #2fd18b; --tc2: #12b3a4; }
+.bottomnav button[data-route="/settings"] { --tc: #b28cff; --tc2: #7c6cf0; }
+:root[data-theme="light"] .bottomnav button[data-route="/"]         { --tc: #1c86e8; --tc2: #5a5ff0; }
+:root[data-theme="light"] .bottomnav button[data-route="/records"]  { --tc: #f08c00; --tc2: #ea5f1f; }
+:root[data-theme="light"] .bottomnav button[data-route="/export"]   { --tc: #12a46a; --tc2: #0e9488; }
+:root[data-theme="light"] .bottomnav button[data-route="/settings"] { --tc: #8a5cf6; --tc2: #6b4fe0; }
+.bottomnav button .ic {
+  display: block; width: 24px; height: 24px; color: var(--tc);
+  transition: transform .35s cubic-bezier(.2,.9,.3,1.4), filter .25s;
+}
+.bottomnav button .ic svg {
+  display: block; width: 24px; height: 24px;
+  fill: color-mix(in srgb, var(--tc2) 24%, transparent);
+  transition: fill .25s;
+}
+.bottomnav button .lab {
+  display: block; max-height: 14px; line-height: 14px; overflow: hidden;
+  transition: max-height var(--dock-t) var(--dock-e), opacity calc(var(--dock-t) * .6) ease;
+}
 .bottomnav button:active .ic { transform: scale(.84); }
-.bottomnav button.active { color: var(--accent); }
-.bottomnav button.active .ic svg { fill: color-mix(in srgb, currentColor 20%, transparent); }
-html.dock-mini .dock { max-width: 236px; padding: 4px; }
+.bottomnav button.active { color: var(--text); font-weight: 700; }
+.bottomnav button.active .ic { transform: scale(1.06); filter: drop-shadow(0 3px 7px color-mix(in srgb, var(--tc) 55%, transparent)); }
+.bottomnav button.active .ic svg { fill: color-mix(in srgb, var(--tc2) 42%, transparent); }
+html.dock-mini .dock { max-width: 236px; }
 html.dock-mini .bottomnav button { height: 44px; gap: 0; }
 html.dock-mini .bottomnav button .lab { max-height: 0; opacity: 0; }
 @media (prefers-reduced-motion: reduce) {
-  .dock, .dock .nav-pill, .bottomnav button, .bottomnav button .lab { transition: none; }
+  .dock, .dock .nav-pill, .dock.pill-ready .nav-pill, .bottomnav button, .bottomnav button .lab { transition: none; }
 }
 
 input.locked, textarea.locked {
@@ -1631,3 +1682,60 @@ label.field.invalid .lab { color: var(--bad); }
 .est-card { box-shadow: 0 30px 70px -10px rgba(0,0,0,.55), inset 0 1px 1px rgba(255,255,255,.22), inset 0 0 0 1px rgba(255,255,255,.05); }
 /* Dialog buttons stay on one line ("Fill 547 readings"). */
 .confirm-card .cf-actions .btn { padding: 13px 10px; font-size: 15px; white-space: nowrap; }
+
+/* ---- Fire detectors: future lock + editor ---- */
+/* A round that hasn't come yet: readable, but clearly not tickable. */
+.det.locked { opacity: .62; }
+.det.locked .cb { border-style: dashed; font-size: 11px; color: var(--muted); }
+.det.shake { animation: det-shake .36s cubic-bezier(.36,.07,.19,.97); }
+@keyframes det-shake {
+  20%, 60% { transform: translateX(-5px); }
+  40%, 80% { transform: translateX(5px); }
+}
+/* Long-press feedback: the row sinks slightly while held. */
+.det { transition: transform .18s ease, background .2s; }
+.det:active { transform: scale(.985); }
+
+.future-note {
+  display: flex; align-items: flex-start; gap: 10px;
+  margin: 12px 0 10px; padding: 12px 14px; border-radius: 16px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.future-note .fn-ic { font-size: 17px; line-height: 1.2; }
+.future-note .fn-title { font-size: 13.5px; font-weight: 800; color: var(--accent); }
+.future-note .fn-sub { font-size: 12px; color: var(--muted); margin-top: 3px; line-height: 1.45; }
+
+.det-edit { max-width: 380px; text-align: left; }
+.det-edit .de-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.det-edit .de-ic {
+  width: 44px; height: 44px; flex: 0 0 auto; border-radius: 14px;
+  display: flex; align-items: center; justify-content: center; font-size: 22px;
+  background: var(--icon-bg); border: 1px solid var(--line);
+}
+.det-edit .cf-title { text-align: left; }
+.det-edit .de-sub { font-size: 12px; color: var(--muted); margin-top: 3px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.det-edit label.field { margin-bottom: 12px; }
+.det-edit input { font-weight: 700; letter-spacing: .5px; }
+.det-edit textarea { resize: none; font-size: 15px; line-height: 1.4; font-family: inherit; }
+.det-edit .de-note { font-size: 12px; margin: 2px 2px 0; }
+.det-edit .de-orig {
+  display: flex; align-items: center; gap: 10px; justify-content: space-between;
+  font-size: 12px; color: var(--muted); padding: 8px 10px; border-radius: 12px;
+  background: var(--bg2); border: 1px dashed var(--line-strong);
+}
+.det-edit .de-orig b { color: var(--text); }
+.det-edit .de-restore {
+  flex: 0 0 auto; width: auto; background: none; border: none; padding: 4px 2px;
+  color: var(--accent); font-size: 12.5px; font-weight: 800; cursor: pointer;
+}
+
+/* The "S 3 → S 33" line in the renumber warning. */
+.det-change {
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+  margin: 4px 0 12px; font-size: 18px; font-weight: 800; letter-spacing: .5px;
+}
+.det-change .dc-old { color: var(--muted); text-decoration: line-through; }
+.det-change .dc-arrow { color: var(--muted); font-weight: 400; }
+.det-change .dc-new { color: var(--bad); }
+.dc-kind { margin-top: 10px; font-weight: 700; color: var(--warn); }

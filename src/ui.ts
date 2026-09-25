@@ -98,44 +98,34 @@ async function renderRoute() {
 }
 
 function updateNav(path: string) {
-  let activeBtn: HTMLElement | null = null;
-  document.querySelectorAll<HTMLElement>(".bottomnav button").forEach((b) => {
+  let idx = -1;
+  document.querySelectorAll<HTMLElement>(".bottomnav button").forEach((b, i) => {
     const target = b.dataset.route!;
     const active = target === "/" ? path === "/" : path.startsWith(target);
     b.classList.toggle("active", active);
-    if (active) activeBtn = b;
+    if (active) idx = i;
   });
-  moveNavPill(activeBtn);
+  moveNavPill(idx);
 }
 
-// Slide the highlight pill under the active dock item.
-let navActive: HTMLElement | null = null;
-let navObserver: ResizeObserver | null = null;
-function placeNavPill() {
-  const pill = document.querySelector<HTMLElement>(".nav-pill");
-  const btn = navActive;
-  if (!pill) return;
-  if (!btn || !btn.offsetWidth) { pill.style.opacity = btn ? pill.style.opacity : "0"; return; }
-  pill.style.opacity = "1";
-  pill.style.width = `${btn.offsetWidth}px`;
-  pill.style.height = `${btn.offsetHeight}px`;
-  // Position exactly over the active button box (offsetLeft/Top are relative
-  // to the dock, so the highlight sits evenly around the icon + label).
-  pill.style.transform = `translate(${btn.offsetLeft}px, ${btn.offsetTop}px)`;
-}
-function moveNavPill(btn: HTMLElement | null) {
+/**
+ * Slide the glass lens under the active dock item.
+ *
+ * The lens is sized and placed purely in CSS (a quarter of the dock, shifted by
+ * its own width per index), so when the dock folds or unfolds on scroll the
+ * lens resizes in the very same frame. It used to be measured in JS and then
+ * animated to the new size, which left it hanging outside the shrinking dock
+ * for a moment before catching up.
+ */
+function moveNavPill(idx: number) {
   const dock = document.querySelector<HTMLElement>(".dock");
   if (!dock) return;
-  navActive = btn;
-  // The dock shrinks to icons only while scrolling down; the pill has to
-  // follow the button as it resizes, not just when the route changes.
-  if (!navObserver && "ResizeObserver" in window) {
-    navObserver = new ResizeObserver(() => placeNavPill());
-    navObserver.observe(dock);
-  }
-  // Wait a frame if layout isn't measured yet (first paint).
-  if (btn?.offsetWidth) placeNavPill();
-  else requestAnimationFrame(placeNavPill);
+  if (idx < 0) { dock.classList.remove("has-active"); return; }
+  const first = !dock.classList.contains("pill-ready");
+  dock.style.setProperty("--i", String(idx));
+  dock.classList.add("has-active");
+  // No slide on first paint — the lens just appears under the current tab.
+  if (first) requestAnimationFrame(() => requestAnimationFrame(() => dock.classList.add("pill-ready")));
 }
 
 // ---- theme (light / dark) ----
@@ -151,7 +141,7 @@ export function applyTheme(t: Theme) {
   localStorage.setItem(THEME_KEY, t);
   const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
   // Matches the glass top bar, so the phone status bar reads as part of it.
-  if (meta) meta.content = t === "light" ? "#eef4fa" : "#0b1d2c";
+  if (meta) meta.content = t === "light" ? "#eaf2fa" : "#0a1e30";
 }
 
 export function initTheme() {

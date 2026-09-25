@@ -1,12 +1,16 @@
-import { h, topbar, screen, toast, segmented, navigate, progressRing } from "../ui";
+import { h, topbar, screen, toast, segmented, navigate, progressRing, longPress, confirmDialog } from "../ui";
 import { db, getSetting, setSetting } from "../db";
 import { isoDate, parseIso, isSaturday, MONTHS_SHORT, ddMmmYyyy } from "../util";
 import { periodHead, bindHeadGestures } from "./periodhead";
 import { matchRow, highlight, type SearchField } from "../search";
+import { masters, detKey as keyOf } from "../seed";
+import { saveFireEdit, originalDet, isEdited } from "../fireEdits";
 import {
   currentFireSession,
   sortByWalk,
   kindCounts,
+  detKind,
+  detArea,
   AREA_LABEL,
   KIND_META,
   SPECIAL_ACCESS,
@@ -123,18 +127,118 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
     return map;
   }
 
-  async function toggle(d: ScheduledDet, logDate: string) {
+  /** A detector whose Saturday hasn't come yet can't be ticked. */
+  const isFuture = (d: ScheduledDet) => (plan.satOfDet.get(d.detKey) ?? "") > todayIso;
+
+  async function toggle(d: ScheduledDet, logDate: string, row?: HTMLElement) {
     const evs = (await db.fireTest.where("detKey").equals(d.detKey).toArray()).filter((t) => {
       const m = t.testedDate.slice(0, 7);
       return m >= plan.startYm && m <= plan.endYm;
     });
     if (evs.length) {
+      // Unticking is always allowed — it only ever removes a mistake.
       await db.fireTest.bulkDelete(evs.map((e) => e.id!));
     } else {
-      await db.fireTest.add({ detKey: d.detKey, testedDate: logDate, remarks: "satisfactory" });
+      // Ticking is only for rounds that are due: today's Saturday or one
+      // already past. A future round unlocks on its own date, so a stray tap
+      // while browsing the quarter can't record a test that hasn't happened.
+      if (isFuture(d)) {
+        toast(`Due on ${ddMmmYyyy(plan.satOfDet.get(d.detKey)!)} — it can be ticked from that day`, 2400);
+        if (row) { row.classList.remove("shake"); void row.offsetWidth; row.classList.add("shake"); }
+        return;
+      }
+      const when = logDate > todayIso ? todayIso : logDate; // never a future date
+      await db.fireTest.add({ detKey: d.detKey, testedDate: when, remarks: "satisfactory" });
       toast(`Tested: ${d.id}`, 900);
     }
     await paint();
+  }
+
+  /**
+   * Edit a detector's number / location (long-press on its row). The change is
+   * kept as an override on the register and goes into every export from now
+   * on, so renumbering asks for a second confirmation.
+   */
+  function editDetector(d: ScheduledDet) {
+    const raw = masters.fireDetectors.find((x: any) => keyOf(x) === d.detKey);
+    const orig = originalDet(d.detKey);
+    if (!raw || !orig) return;
+    const curId: string = raw.id ?? "";
+    const idIn = h("input", { value: curId, placeholder: "e.g. S 51", autocapitalize: "characters",
+      autocomplete: "off", spellcheck: false }) as HTMLInputElement;
+    const locIn = h("textarea", { rows: 3, placeholder: "Where it is on board", spellcheck: false }) as HTMLTextAreaElement;
+    locIn.value = raw.location ?? "";
+    const err = h("div", { class: "cf-err" }, "");
+    const kindChip = h("span", { class: `kind k-${d.kind}` }, KIND_META[d.kind].short);
+    const syncKind = () => {
+      const k = detKind(idIn.value.trim() || `#${raw.sn}`, locIn.value);
+      kindChip.className = `kind k-${k}`;
+      kindChip.textContent = KIND_META[k].short;
+    };
+    idIn.addEventListener("input", syncKind);
+
+    let busy = false;
+    const close = () => { back.classList.remove("show"); setTimeout(() => back.remove(), 220); };
+    const save = async () => {
+      if (busy) return;
+      const id = idIn.value.trim().toUpperCase().replace(/\s+/g, " ");
+      const location = locIn.value.trim().replace(/\s+/g, " ");
+      if (!location) { err.textContent = "Location can't be empty."; locIn.focus(); return; }
+      if (id !== curId.trim()) {
+        const newKind = detKind(id || `#${raw.sn}`, location);
+        busy = true;
+        const ok = await confirmDialog({
+          title: "Change detector number?",
+          body: h("div", {},
+            h("div", { class: "det-change" },
+              h("span", { class: "dc-old" }, curId || "—"), h("span", { class: "dc-arrow" }, "→"),
+              h("span", { class: "dc-new" }, id || "—")),
+            h("div", {}, "Check the fire-detection manual / panel drawing first. Are you sure about this detector? The new number is used for every test and export from now on."),
+            newKind !== d.kind
+              ? h("div", { class: "dc-kind" }, `It will now count as a ${KIND_META[newKind].label.toLowerCase()} (${KIND_META[newKind].tester}).`)
+              : null),
+          confirm: "Yes, change it",
+          danger: true,
+        });
+        busy = false;
+        if (!ok) return;
+      }
+      await saveFireEdit(d.detKey, { id, location });
+      // Refresh the scheduled copy in place so the list redraws without a reload.
+      d.id = raw.id || `#${raw.sn}`;
+      d.location = raw.location || "";
+      d.kind = detKind(d.id, d.location);
+      d.area = detArea(d.location);
+      const sat = plan.satOfDet.get(d.detKey);
+      if (sat) plan.bySat.set(sat, sortByWalk(plan.bySat.get(sat) ?? []));
+      close();
+      toast("Detector updated", 1200);
+      await paint();
+    };
+
+    const edited = isEdited(d.detKey);
+    const card = h("div", { class: "confirm-card det-edit", onClick: (e: Event) => e.stopPropagation() },
+      h("div", { class: "de-head" },
+        h("div", { class: "de-ic" }, KIND_META[d.kind].icon),
+        h("div", { class: "de-titles" },
+          h("div", { class: "cf-title" }, "Edit detector"),
+          h("div", { class: "de-sub" }, `${d.battery ? "Battery sheet" : "Main sheet"} · row ${d.row} · `, kindChip))),
+      h("label", { class: "field" }, h("span", { class: "lab" }, "Detector number"), idIn),
+      h("label", { class: "field" }, h("span", { class: "lab" }, "Location"), locIn),
+      edited
+        ? h("div", { class: "de-orig" },
+            h("span", {}, "Original: ", h("b", {}, orig.id || "—"), ` · ${orig.location || "—"}`),
+            h("button", { type: "button", class: "de-restore", onClick: () => {
+              idIn.value = orig.id; locIn.value = orig.location; syncKind();
+            } }, "Restore"))
+        : h("div", { class: "hint de-note" }, "Changes go into the TEC(A) 37 export from now on."),
+      err,
+      h("div", { class: "cf-actions" },
+        h("button", { class: "btn secondary", type: "button", onClick: close }, "Cancel"),
+        h("button", { class: "btn", type: "button", onClick: () => void save() }, "Save")));
+    const back = h("div", { class: "confirm-back", onClick: close }, card);
+    document.body.append(back);
+    requestAnimationFrame(() => back.classList.add("show"));
   }
 
   // A single detector row. The location is the actual address on board, so it
@@ -144,13 +248,17 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
     // While searching, the tag and location carry the highlight so the user can
     // see the matched text in place.
     const q = query.trim();
-    return h(
+    const locked = !tested && isFuture(d);
+    // A long-press opens the editor; the tap that ends it must not also tick.
+    let pressed = false;
+    const row = h(
       "div",
       {
-        class: `det ${tested ? "tested" : ""}`,
-        onClick: () => toggle(d, logDate),
+        class: `det ${tested ? "tested" : ""}${locked ? " locked" : ""}`,
+        onClick: () => { if (pressed) { pressed = false; return; } void toggle(d, logDate, row); },
+        onContextmenu: (e: Event) => e.preventDefault(),
       },
-      h("div", { class: "cb" }, tested ? "✓" : ""),
+      h("div", { class: "cb" }, tested ? "✓" : locked ? "🔒" : ""),
       h("div", { class: "info" },
         h("div", { class: "idrow" },
           h("span", { class: "id" }, q ? highlight(d.id || "—", q) : (d.id || "—")),
@@ -164,6 +272,13 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
       h("div", { class: "detright" },
         rightChip ?? (tested ? h("span", { class: "chip done", style: { fontSize: "10px" } }, ddMon(tested)) : null))
     );
+    longPress(row, () => {
+      pressed = true;
+      setTimeout(() => { pressed = false; }, 900);
+      navigator.vibrate?.(15);
+      editDetector(d);
+    }, 550);
+    return row;
   }
 
   // Render an area-grouped detector list into `container`, in walk order. Each
@@ -275,7 +390,7 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
           h("div", { class: "fh-top" },
             h("div", { class: "fh-kicker" }, `${qLabel} · FULL CYCLE`),
             h("span", { class: `chip ${tested.size >= plan.total ? "done" : "due"}` }, `${tested.size}/${plan.total}`)),
-          h("div", { class: "fh-sub" }, "Every detector is scheduled once across the quarter's Saturdays. Tap any to mark tested."),
+          h("div", { class: "fh-sub" }, "Every detector is scheduled once across the quarter's Saturdays. Tap to mark tested once its Saturday has come · long-press to edit number or location."),
           isolationWarning(),
           h("div", { class: "fh-carry" }, "Full cycle needs"),
           testerSummary(allDets))
@@ -287,7 +402,14 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
     // it's the actual test date that goes on the record — so the date the taps
     // are logged under is an editable field right above the list.
     controlsEl.replaceChildren();
-    if (view === "session") {
+    if (view === "session" && sessionSat > todayIso) {
+      // An upcoming round: nothing can be ticked yet, so no date to pick.
+      controlsEl.append(h("div", { class: "future-note" },
+        h("span", { class: "fn-ic" }, "🔒"),
+        h("div", {},
+          h("div", { class: "fn-title" }, `Opens on ${ddMmmYyyy(sessionSat)}`),
+          h("div", { class: "fn-sub" }, "These detectors can be ticked from that day on. Long-press any of them to edit its number or location."))));
+    } else if (view === "session") {
       const dateInput = h("input", {
         type: "date", class: "rec-date", value: recordDate, max: todayIso,
         "aria-label": "Date these tests are recorded on",
@@ -311,7 +433,7 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
         h("p", { class: "hint" },
           recordDate !== sessionSat
             ? `Scheduled for ${ddMmmYyyy(sessionSat)} — tests you tap now are logged on ${ddMmmYyyy(recordDate)}.`
-            : "Tap each detector as you test it. Did it on another day? Change the date above first.")
+            : "Tap each detector as you test it. Did it on another day? Change the date above first. Long-press a detector to edit its number or location.")
       );
     }
 

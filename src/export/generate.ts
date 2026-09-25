@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import { isEdited } from "../fireEdits";
 import { db, getSetting } from "../db";
 import { masters } from "../seed";
 import { recById } from "../records";
@@ -98,7 +99,7 @@ export interface ExportResult {
 
 // ---------- Signature blocks ----------
 /**
- * The Chief Engineer / ATO names printed on the reports that carry a signature
+ * The Chief Engineer / ETO names printed on the reports that carry a signature
  * block. They were baked into the template files, so a change of officer meant
  * the sheets went out with the previous crew's names on them. They now come
  * from Settings, and only the sheets that actually have those blocks are
@@ -492,6 +493,12 @@ export async function genFire(ymStr: string): Promise<ExportResult> {
   for (const d of masters.fireDetectors) {
     const ws = d.sheet === "battery" ? wsBatt : wsMain;
     const rec = byDet.get(`${d.sheet}:${d.row}`);
+    // A detector renumbered or re-described in the app carries its corrected
+    // tag (col B) and location (col C); untouched rows keep the template text.
+    if (isEdited(`${d.sheet}:${d.row}`)) {
+      setVal(ws, d.row, 2, d.id || null);
+      setVal(ws, d.row, 3, d.location || null);
+    }
     // col E(5) date last tested, F(6) date tested this quarter, G(7) next due, H(8) remarks
     setVal(ws, d.row, 5, rec?.prior ? excelSerial(parseIso(rec.prior)) : null);
     if (rec?.thisQ) {
