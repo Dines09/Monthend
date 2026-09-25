@@ -3,6 +3,7 @@ import { db, type BatteryEntry } from "../db";
 import { masters } from "../seed";
 import { saturdaysInMonth, ymParts, debounce, ddMmmYyyy, parseIso, MONTHS_SHORT, isoDate } from "../util";
 import { periodHead, bindHeadGestures } from "./periodhead";
+import { historySpec, TOL } from "../smart";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -122,7 +123,12 @@ export async function renderBattery(_p: Record<string, string>, mount: HTMLEleme
 
     // Previous cycle's readings for this same bank, shown as grey placeholders so
     // the user can see what the cell read last Saturday while entering today's.
-    const prevEntry = await previousBankEntry(selDate, bank.id);
+    const pastEntries = await previousBankEntries(selDate, bank.id, 8);
+    const prevEntry = pastEntries[0];
+    // What each cell has read over the last couple of months — a cell that
+    // suddenly reads well away from its own normal is flagged as it's typed.
+    const cellHist = (i: number, f: "volt" | "aux") =>
+      pastEntries.map((e) => e.readings?.[i]?.[f]).filter((v): v is number => typeof v === "number").reverse();
     const prevVolt = (i: number) => {
       const v = prevEntry?.readings?.[i]?.volt;
       return typeof v === "number" ? String(v) : "—";
@@ -148,7 +154,12 @@ export async function renderBattery(_p: Record<string, string>, mount: HTMLEleme
     }
 
     // Voltage rule for this bank: 2 V cells vs. 12 V (lifeboat / emergency) banks.
-    const voltSpec = isCCA ? CELL_12V : CELL_2V;
+    const hardVolt = isCCA ? CELL_12V : CELL_2V;
+    const voltSpecFor = (i: number) =>
+      historySpec(cellHist(i, "volt"), isCCA ? TOL.cell12v : TOL.cell2v,
+        { decimals: 2, unit: "V", hard: { min: hardVolt.min, max: hardVolt.max } }) ?? hardVolt;
+    const ccaSpecFor = (i: number) =>
+      historySpec(cellHist(i, "aux"), TOL.cca, { decimals: 0, unit: "", hard: { min: CCA_SPEC.min, max: CCA_SPEC.max } }) ?? CCA_SPEC;
 
     // Battery graphic: one tappable cell per 2V cell (or per battery for CCA).
     // Focus is never moved for the user — a cell voltage like 2.11 must be
@@ -159,13 +170,13 @@ export async function renderBattery(_p: Record<string, string>, mount: HTMLEleme
       const cell = h("div", { class: `cell ${r.volt != null ? "filled" : ""}` });
       const warn = h("div", { class: "field-warn" }, "");
       const voltInp = numInput({
-        value: r.volt ?? null, placeholder: prevVolt(i), spec: voltSpec,
+        value: r.volt ?? null, placeholder: prevVolt(i), spec: voltSpecFor(i),
         onInput: debounce(async (v) => { readings[i].volt = v; cell.classList.toggle("filled", v != null); recalcTotal(); await persist(); }, 300),
       });
       cell.append(h("div", { class: "cnum" }, isCCA ? r.label : `Cell ${r.label}`), voltInp);
       if (isCCA) {
         const ccaInp = numInput({
-          value: typeof r.aux === "number" ? r.aux : null, placeholder: prevAux(i), spec: CCA_SPEC,
+          value: typeof r.aux === "number" ? r.aux : null, placeholder: prevAux(i), spec: ccaSpecFor(i),
           onInput: debounce(async (v) => { readings[i].aux = v; await persist(); }, 300),
         });
         ccaInp.classList.add("cca");
@@ -241,11 +252,12 @@ export async function renderBattery(_p: Record<string, string>, mount: HTMLEleme
  * but it falls back further so a skipped week still shows something useful.
  * Used for the grey placeholder readings.
  */
-async function previousBankEntry(date: string, bankId: string): Promise<BatteryEntry | undefined> {
+async function previousBankEntries(date: string, bankId: string, limit: number): Promise<BatteryEntry[]> {
   const rows = await db.battery.where("bankId").equals(bankId).toArray();
   return rows
     .filter((r) => r.date < date)
-    .sort((a, b) => b.date.localeCompare(a.date))[0];
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, limit);
 }
 
 export function bankComplete(e: BatteryEntry | undefined): boolean {

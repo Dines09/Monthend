@@ -1,5 +1,6 @@
 import JSZip from "jszip";
-import { h, topbar, screen, toast } from "../ui";
+import { h, topbar, screen, toast, navigate } from "../ui";
+import { auditMonth } from "../audit";
 import { statusBadge } from "../status";
 import { RECORDS } from "../records";
 import { GENERATORS, type ExportResult } from "../export/generate";
@@ -10,6 +11,7 @@ export async function renderExport(_p: Record<string, string>, mount: HTMLElemen
   let curYm = defaultReportYm();
 
   const fileList = h("div", {});
+  const auditWrap = h("div", {});
   const yearSel = h("select", {});
   const monthSel = h("select", {});
 
@@ -41,7 +43,40 @@ export async function renderExport(_p: Record<string, string>, mount: HTMLElemen
   monthSel.addEventListener("change", syncYm);
   rebuildMonths();
 
+  /**
+   * The last look before the files go: any reading far outside what that item
+   * has read before is listed here, each one a tap away from its screen.
+   */
+  async function renderAudit() {
+    const ym = curYm;
+    let odd;
+    try { odd = await auditMonth(ym); } catch { auditWrap.replaceChildren(); return; }
+    if (ym !== curYm) return; // month changed while checking
+    if (!odd.length) {
+      auditWrap.replaceChildren(h("div", { class: "audit ok" },
+        h("span", { class: "audit-ic" }, "✓"),
+        h("span", {}, "Every reading is within its usual range")));
+      return;
+    }
+    const SHOW = 6;
+    const list = h("div", { class: "audit-list" },
+      ...odd.slice(0, SHOW).map((o) =>
+        h("button", { type: "button", class: "audit-row", onClick: () => navigate(o.route) },
+          h("span", { class: "audit-ric" }, o.icon),
+          h("span", { class: "audit-what" }, o.what, h("small", {}, `usual ${o.usual}`)),
+          h("span", { class: "audit-val" }, o.value))));
+    if (odd.length > SHOW) list.append(h("div", { class: "audit-more" }, `and ${odd.length - SHOW} more`));
+    auditWrap.replaceChildren(h("div", { class: "audit warn" },
+      h("div", { class: "audit-head" },
+        h("span", { class: "audit-ic" }, "!"),
+        h("div", {},
+          h("div", { class: "audit-title" }, `${odd.length} reading${odd.length === 1 ? "" : "s"} look${odd.length === 1 ? "s" : ""} unusual`),
+          h("div", { class: "audit-sub" }, "Far from what these items normally read — worth a second look before sending."))),
+      list));
+  }
+
   async function renderFiles() {
+    void renderAudit();
     fileList.replaceChildren();
     for (const rec of RECORDS) {
       let sub = "";
@@ -109,6 +144,7 @@ export async function renderExport(_p: Record<string, string>, mount: HTMLElemen
         h("div", { class: "lab", style: { fontSize: "13px", marginBottom: "8px", fontWeight: 600 } }, "Reporting month"),
         h("div", { style: { display: "flex", gap: "10px" } }, monthSel, yearSel)),
       exportAllBtn,
+      auditWrap,
       h("p", { class: "hint", style: { textAlign: "center", margin: "12px 0" } }, "or download individual files:"),
       fileList,
       h("p", { class: "hint", style: { marginTop: "16px" } },

@@ -4,6 +4,7 @@ import { masters } from "../seed";
 import { ym as ymOf, defaultReportYm, debounce } from "../util";
 import { periodHead, bindHeadGestures } from "./periodhead";
 import { matchRow, highlight, hitChips, type SearchField } from "../search";
+import { historySpec, monthlyHistory, TOL } from "../smart";
 
 export async function renderMotorTemp(_p: Record<string, string>, mount: HTMLElement) {
   let curYm = defaultReportYm();
@@ -27,12 +28,19 @@ export async function renderMotorTemp(_p: Record<string, string>, mount: HTMLEle
     ...(mo.rating ? [{ label: "Rating", text: `${mo.rating} KW`, units: ["kw"] }] : []),
   ];
 
+  // Each motor's readings from the months before this one — what "normal" looks
+  // like for it, so a typo (14 for 41) is caught as it is typed.
+  let history = new Map<string, number[]>();
+
   async function load() {
-    const rows = await db.motorTemp.where("ym").equals(curYm).toArray();
-    const prev = await db.motorTemp.where("ym").equals(shiftYm(curYm, -1)).toArray();
-    const valMap = new Map(rows.map((r) => [r.motorRow, r.temp]));
-    const prevMap = new Map(prev.map((r) => [r.motorRow, r.temp]));
-    const erRow = await db.motorErTemp.get(`motortemp:${curYm}`);
+    const [all, erRow] = await Promise.all([
+      db.motorTemp.toArray(),
+      db.motorErTemp.get(`motortemp:${curYm}`),
+    ]);
+    const prevYm = shiftYm(curYm, -1);
+    const valMap = new Map(all.filter((r) => r.ym === curYm).map((r) => [r.motorRow, r.temp]));
+    const prevMap = new Map(all.filter((r) => r.ym === prevYm).map((r) => [r.motorRow, r.temp]));
+    history = monthlyHistory(all, curYm, (r) => String(r.motorRow), (r) => r.temp).values;
     render(valMap, prevMap, erRow?.value ?? null);
   }
 
@@ -61,16 +69,18 @@ export async function renderMotorTemp(_p: Record<string, string>, mount: HTMLEle
       const inp = numInput({
         value: val ?? null,
         placeholder: prevMap.get(mo.row) != null ? String(prevMap.get(mo.row)) : "",
-        onInput: debounce(async (v) => { await saveTemp(curYm, mo.row, v); recount(); }, 350),
+        spec: historySpec(history.get(String(mo.row)) ?? [], TOL.motorTemp,
+          { decimals: 1, unit: "°C", hard: { min: 0, max: 120 } }),
+        onInput: debounce(async (v) => { await saveTemp(curYm, mo.row, v); row.classList.toggle("filled", v != null); recount(); }, 350),
       });
-      listEl.append(
-        h("div", { class: `mrow ${val != null ? "filled" : ""}` },
+      const row = h("div", { class: `mrow warnhost ${val != null ? "filled" : ""}` },
           h("div", { class: "mname" },
             q ? highlight(mo.name, q) : mo.name,
             h("small", {}, `${mo.no ? "#" + mo.no + " · " : ""}${mo.mounting || ""} ${mo.rating ? "· " + mo.rating + " KW" : ""}`),
             hitChips(hits, q, { Rating: ["kw"] })),
-          inp)
-      );
+          inp,
+          h("div", { class: "field-warn" }));
+      listEl.append(row);
     }
     countEl.textContent = q ? `${shown} of ${masters.motorTempMotors.length} motors match “${q}”` : "";
     if (shown === 0) {

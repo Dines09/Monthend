@@ -4,6 +4,7 @@ import { masters } from "../seed";
 import { ym as ymOf, defaultReportYm, debounce } from "../util";
 import { periodHead, bindHeadGestures } from "./periodhead";
 import { matchRow, highlight, hitChips, type SearchField } from "../search";
+import { historySpec, monthlyHistory, TOL } from "../smart";
 
 export async function renderVibration(_p: Record<string, string>, mount: HTMLElement) {
   let curYm = defaultReportYm();
@@ -22,13 +23,20 @@ export async function renderVibration(_p: Record<string, string>, mount: HTMLEle
     ...(mo.rating ? [{ label: "Rating", text: `${mo.rating} KW`, units: ["kw"] }] : []),
   ];
 
+  let velHist = new Map<string, number[]>();
+  let accHist = new Map<string, number[]>();
+
   async function load() {
     // Last month's readings ride along as grey placeholders, so the user can see
     // what this motor read last time while entering the new figure.
-    const [rows, prevRows] = await Promise.all([
-      db.motorVibration.where("ym").equals(curYm).toArray(),
-      db.motorVibration.where("ym").equals(shiftYm(curYm, -1)).toArray(),
-    ]);
+    const all = await db.motorVibration.toArray();
+    const prevYm = shiftYm(curYm, -1);
+    const rows = all.filter((r) => r.ym === curYm);
+    const prevRows = all.filter((r) => r.ym === prevYm);
+    // Per motor + end + quantity history, for the "unusual reading" check.
+    const key = (r: { motorRow: number; end: string }) => `${r.motorRow}:${r.end}`;
+    velHist = monthlyHistory(all, curYm, key, (r) => r.vel).values;
+    accHist = monthlyHistory(all, curYm, key, (r) => r.acc).values;
     const map = new Map<string, { vel?: number | null; acc?: number | null }>();
     for (const r of rows) map.set(`${r.motorRow}:${r.end}`, { vel: r.vel, acc: r.acc });
     const prevMap = new Map<string, { vel?: number | null; acc?: number | null }>();
@@ -56,23 +64,27 @@ export async function renderVibration(_p: Record<string, string>, mount: HTMLEle
         const prev = prevMap.get(`${mo.row}:${end}`) ?? {};
         // Grey hint = last month's value for this exact motor + end. Falls back
         // to the field name when there is no history to show.
+        const hk = `${mo.row}:${end}`;
         const velInp = numInput({ value: cur.vel ?? null,
           placeholder: prev.vel != null ? String(prev.vel) : "Vel",
+          spec: historySpec(velHist.get(hk) ?? [], TOL.vibVel, { decimals: 3, unit: "mm/s" }),
           onInput: debounce(async (v) => { await saveVib(curYm, mo.row, end, { vel: v }); recount(); }, 350) });
         const accInp = numInput({ value: cur.acc ?? null,
           placeholder: prev.acc != null ? String(prev.acc) : "Acc",
+          spec: historySpec(accHist.get(hk) ?? [], TOL.vibAcc, { decimals: 3, unit: "" }),
           onInput: debounce(async (v) => { await saveVib(curYm, mo.row, end, { acc: v }); recount(); }, 350) });
         ends.push(
-          h("div", { style: { display: "flex", alignItems: "center", gap: "8px", marginTop: "6px" } },
-            h("div", { style: { width: "72px", fontSize: "12px", color: "var(--muted)" } }, end === "drive" ? "Drive end" : "Free end"),
-            h("div", { class: "twin", style: { display: "flex", gap: "6px", flex: "1" } }, velInp, accInp))
+          h("div", { class: "vib-end warnhost" },
+            h("div", { class: "vib-endlab" }, end === "drive" ? "Drive end" : "Free end"),
+            h("div", { class: "twin" }, velInp, accInp),
+            h("div", { class: "field-warn" }))
         );
       }
       listEl.append(
-        h("div", { class: "card", style: { padding: "12px 14px" } },
-          h("div", { style: { fontWeight: "700", fontSize: "14px" } },
+        h("div", { class: `card vib-card${filledMotors.has(mo.row) ? " filled" : ""}` },
+          h("div", { class: "vib-name" },
             q ? highlight(mo.name, q) : mo.name,
-            mo.rating ? h("span", { style: { color: "var(--muted)", fontWeight: "400" } }, `  (${mo.rating} KW)`) : null),
+            mo.rating ? h("span", { class: "vib-kw" }, `  (${mo.rating} KW)`) : null),
           hitChips(hits, q, { Rating: ["kw"] }),
           ...ends)
       );

@@ -4,6 +4,7 @@ import { masters } from "../seed";
 import { defaultReportYm, debounce } from "../util";
 import { periodHead, bindHeadGestures } from "./periodhead";
 import { matchRow, highlight, hitChips, type SearchField } from "../search";
+import { historySpec, monthlyHistory, TOL } from "../smart";
 
 export async function renderConditionMon(_p: Record<string, string>, mount: HTMLElement) {
   let curYm = defaultReportYm();
@@ -31,8 +32,10 @@ export async function renderConditionMon(_p: Record<string, string>, mount: HTML
   }
 
   async function renderTemp() {
-    const rows = await db.cmTemp.where("ym").equals(curYm).toArray();
+    const all = await db.cmTemp.toArray();
+    const rows = all.filter((r) => r.ym === curYm);
     const valMap = new Map(rows.map((r) => [r.motorRow, r.temp]));
+    const hist = monthlyHistory(all, curYm, (r) => String(r.motorRow), (r) => r.temp).values;
     const erRow = await db.motorErTemp.get(`conditionmon:${curYm}`);
 
     const erInp = numInput({ value: erRow?.value ?? null, placeholder: "°C",
@@ -60,14 +63,16 @@ export async function renderConditionMon(_p: Record<string, string>, mount: HTML
       shown++;
       const val = valMap.get(mo.row);
       const inp = numInput({ value: val ?? null, placeholder: mo.idealTemp ? `ideal ${mo.idealTemp}` : "",
+        spec: historySpec(hist.get(String(mo.row)) ?? [], TOL.motorTemp, { decimals: 1, unit: "°C", hard: { min: 0, max: 120 } }),
         onInput: debounce(async (v) => { await saveCmTemp(curYm, mo.row, v); recountTemp(); }, 350) });
       body.append(
-        h("div", { class: `mrow ${val != null ? "filled" : ""}` },
+        h("div", { class: `mrow warnhost ${val != null ? "filled" : ""}` },
           h("div", { class: "mname" },
             q ? highlight(mo.name, q) : mo.name,
             mo.idealTemp ? h("small", {}, `Ideal ${mo.idealTemp}°C`) : null,
             hitChips(hits, q, { Ideal: ["c"] })),
-          inp)
+          inp,
+          h("div", { class: "field-warn" }))
       );
     }
     noteSearch(shown, masters.cmTempMotors.length, q);
@@ -84,8 +89,11 @@ export async function renderConditionMon(_p: Record<string, string>, mount: HTML
   }
 
   async function renderVib() {
-    const rows = await db.cmVib.where("ym").equals(curYm).toArray();
+    const all = await db.cmVib.toArray();
+    const rows = all.filter((r) => r.ym === curYm);
     const map = new Map(rows.map((r) => [r.motorRow, { vel: r.vel, acc: r.acc }]));
+    const velH = monthlyHistory(all, curYm, (r) => String(r.motorRow), (r) => r.vel).values;
+    const accH = monthlyHistory(all, curYm, (r) => String(r.motorRow), (r) => r.acc).values;
     body.append(
       h("button", { class: "btn secondary", style: { marginBottom: "12px" }, onClick: copyVibFromTEC15 }, "⤵ Copy vibration from TEC(A) 15")
     );
@@ -101,14 +109,18 @@ export async function renderConditionMon(_p: Record<string, string>, mount: HTML
       if (hits === null) continue;
       shown++;
       const cur: { vel?: number | null; acc?: number | null } = map.get(mo.row) ?? {};
+      const k = String(mo.row);
       const velInp = numInput({ value: cur.vel ?? null, placeholder: "Vel",
+        spec: historySpec(velH.get(k) ?? [], TOL.vibVel, { decimals: 3, unit: "mm/s" }),
         onInput: debounce(async (v) => { await saveCmVib(curYm, mo.row, { vel: v }); recountVib(); }, 350) });
       const accInp = numInput({ value: cur.acc ?? null, placeholder: "Acc",
+        spec: historySpec(accH.get(k) ?? [], TOL.vibAcc, { decimals: 3, unit: "" }),
         onInput: debounce(async (v) => { await saveCmVib(curYm, mo.row, { acc: v }); recountVib(); }, 350) });
       body.append(
-        h("div", { class: `mrow ${cur.vel != null || cur.acc != null ? "filled" : ""}` },
+        h("div", { class: `mrow warnhost ${cur.vel != null || cur.acc != null ? "filled" : ""}` },
           h("div", { class: "mname" }, q ? highlight(mo.name, q) : mo.name),
-          h("div", { class: "twin", style: { display: "flex", gap: "6px" } }, velInp, accInp))
+          h("div", { class: "twin" }, velInp, accInp),
+          h("div", { class: "field-warn" }))
       );
     }
     noteSearch(shown, masters.cmVibMotors.length, q);

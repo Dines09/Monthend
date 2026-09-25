@@ -3,6 +3,7 @@ import { db } from "../db";
 import { masters } from "../seed";
 import { ym as ymOf, defaultReportYm, debounce } from "../util";
 import { periodHead, bindHeadGestures } from "./periodhead";
+import { historySpec, monthlyHistory, TOL } from "../smart";
 
 const PHASES: ("U" | "V" | "W")[] = ["U", "V", "W"];
 const PHASE_LABEL: Record<string, string> = { U: "Black U", V: "White V", W: "Red W" };
@@ -19,9 +20,11 @@ export async function renderBusbar(_p: Record<string, string>, mount: HTMLElemen
 
   async function load() {
     body.replaceChildren();
-    const rows = await db.busbar.where("ym").equals(curYm).toArray();
+    const all = await db.busbar.toArray();
     const prevYm = shiftYm(curYm, -1);
-    const prev = await db.busbar.where("ym").equals(prevYm).toArray();
+    const rows = all.filter((r) => r.ym === curYm);
+    const prev = all.filter((r) => r.ym === prevYm);
+    const history = monthlyHistory(all, curYm, (r) => `${r.panelRow}:${r.phase}`, (r) => r.value).values;
     const valMap = new Map(rows.map((r) => [`${r.panelRow}:${r.phase}`, r.value]));
     const prevMap = new Map(prev.map((r) => [`${r.panelRow}:${r.phase}`, r.value]));
     const meta = await db.busbarMeta.get(curYm);
@@ -50,20 +53,22 @@ export async function renderBusbar(_p: Record<string, string>, mount: HTMLElemen
         const inp = numInput({
           value: val ?? null,
           placeholder: prevVal != null ? String(prevVal) : "",
+          spec: historySpec(history.get(key) ?? [], TOL.busbar, { decimals: 1, unit: "°C", hard: { min: 0, max: 110 } }),
           onInput: debounce(async (v) => {
             await saveBusbar(curYm, p.row, ph, v);
             recount();
           }, 350),
         });
         rowsEls.push(
-          h("div", { class: "mrow filled", style: { border: "none", background: "transparent", padding: "4px 0", margin: 0 } },
-            h("div", { class: "mname" }, PHASE_LABEL[ph]),
-            inp)
+          h("div", { class: "mrow phase-row warnhost" },
+            h("div", { class: "mname" }, h("span", { class: `phase-dot ph-${ph}` }), PHASE_LABEL[ph]),
+            inp,
+            h("div", { class: "field-warn" }))
         );
       }
       body.append(
         h("div", { class: "card" },
-          h("div", { style: { fontWeight: "700", marginBottom: "8px" } }, `${p.name}`,
+          h("div", { class: "vib-name", style: { marginBottom: "6px" } }, `${p.name}`,
             p.load ? h("span", { style: { color: "var(--muted)", fontWeight: "400", fontSize: "13px" } }, `  (${p.load} KW)`) : null),
           ...rowsEls)
       );

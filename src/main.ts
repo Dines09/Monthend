@@ -88,9 +88,22 @@ function lockZoom() {
   }, { passive: false });
 }
 
+/** Lift the frosted top bar off the content (shadow) once the page scrolls. */
+function trackScroll() {
+  let on = false, raf = 0;
+  const apply = () => {
+    raf = 0;
+    const next = window.scrollY > 4;
+    if (next !== on) { on = next; document.documentElement.classList.toggle("scrolled", on); }
+  };
+  window.addEventListener("scroll", () => { if (!raf) raf = requestAnimationFrame(apply); }, { passive: true });
+  window.addEventListener("hashchange", () => requestAnimationFrame(apply));
+}
+
 async function boot() {
   initTheme();
   lockZoom();
+  trackScroll();
   app.append(
     h(
       "div",

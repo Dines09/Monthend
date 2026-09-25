@@ -548,6 +548,10 @@ export interface ReadingSpec {
   // but offers a "Use anyway" chip so the user can confirm and keep the reading
   // (e.g. shaft potential > 50 mV that the user has verified).
   allowOverride?: boolean;
+  /** Value-aware warning (e.g. "higher than normal"); falls back to `warn`. */
+  warnFor?: (v: number) => string;
+  /** Compact form for tight spots such as a battery cell tile. */
+  warnShort?: (v: number) => string;
 }
 
 export function inRange(v: number | null, spec: ReadingSpec): boolean {
@@ -570,6 +574,39 @@ export function numInput(opts: {
   // The value the user has explicitly confirmed via "Use anyway", so we don't
   // keep flagging it red. Reset whenever the raw text changes to something else.
   let overridden: number | null = null;
+  // Out-of-range is only *shown* once the user pauses (or leaves the field):
+  // typing 41 passes through 4 on the way, and flashing that red on every
+  // keystroke made correct entries look wrong. Clearing is always immediate.
+  let flagTimer: any;
+  const FLAG_DELAY = 650;
+
+  const evaluate = (val: number | null, now: boolean) => {
+    if (!spec) return;
+    clearTimeout(flagTimer);
+    const outOfRange = val != null && !inRange(val, spec);
+    if (val !== overridden) overridden = null;
+    const bad = outOfRange && val !== overridden;
+    if (!bad) { setInvalid(inp, false); return; }
+    // For override-capable fields, offer a "Use anyway" chip instead of a
+    // plain red block: confirming keeps the value like a valid one.
+    const onUseAnyway = spec.allowOverride && val != null
+      ? () => { overridden = val; setInvalid(inp, false); opts.onOverride?.(val); }
+      : undefined;
+    const show = () => {
+      const compact = !!inp.closest(".cell");
+      const msg = val == null ? spec.warn
+        : (compact && spec.warnShort?.(val)) || spec.warnFor?.(val) || spec.warn;
+      setInvalid(inp, true, msg, onUseAnyway, compact ? "OK" : undefined);
+    };
+    if (now) show(); else flagTimer = setTimeout(show, FLAG_DELAY);
+  };
+
+  const parse = (raw: string): number | null => {
+    if (raw === "") return null;
+    const n = Number(raw);
+    return Number.isNaN(n) ? null : n;
+  };
+
   const inp = h("input", {
     type: "text",
     inputmode: opts.decimal === false ? "numeric" : "decimal",
@@ -586,28 +623,14 @@ export function numInput(opts: {
         const capped = capDecimals(raw, spec.decimals ?? 0);
         if (capped !== raw) { raw = capped; el.value = capped; }
       }
-      if (raw === "") { overridden = null; setInvalid(inp, false); return opts.onInput(null); }
-      const n = Number(raw);
-      const val = Number.isNaN(n) ? null : n;
-      if (spec) {
-        const outOfRange = val != null && !inRange(val, spec);
-        // A confirmed value stays accepted; any other out-of-range value is bad.
-        if (val !== overridden) overridden = null;
-        const bad = outOfRange && val !== overridden;
-        // For override-capable fields, offer a "Use anyway" chip instead of a
-        // plain red block: confirming keeps the value and advances like a valid one.
-        const onUseAnyway = (bad && spec.allowOverride && val != null)
-          ? () => {
-              overridden = val;
-              setInvalid(inp, false);
-              opts.onOverride?.(val);
-            }
-          : undefined;
-        setInvalid(inp, bad, spec.warn, onUseAnyway);
-        opts.onInput(val);
-        return;
-      }
+      if (raw === "") { overridden = null; clearTimeout(flagTimer); setInvalid(inp, false); return opts.onInput(null); }
+      const val = parse(raw);
+      evaluate(val, false);
       opts.onInput(val);
+    },
+    onBlur: (e: Event) => {
+      // Leaving the field settles it: show any problem straight away.
+      if (spec) evaluate(parse((e.target as HTMLInputElement).value.trim()), true);
     },
   });
   return inp;
@@ -702,9 +725,9 @@ function capDecimals(raw: string, decimals: number): string {
 // (a small line right under the input), not as a floating toast. When
 // `onUseAnyway` is given, a "Use anyway" chip is shown beside the warning so the
 // user can confirm and keep an out-of-range value.
-function setInvalid(inp: HTMLInputElement, bad: boolean, warn?: string, onUseAnyway?: () => void) {
+function setInvalid(inp: HTMLInputElement, bad: boolean, warn?: string, onUseAnyway?: () => void, useLabel = "Use anyway") {
   inp.classList.toggle("invalid", bad);
-  const wrap = inp.closest(".field, .cell") as HTMLElement | null;
+  const wrap = inp.closest(".field, .cell, .warnhost") as HTMLElement | null;
   wrap?.classList.toggle("invalid", bad);
   const warnEl = wrap?.querySelector<HTMLElement>(".field-warn");
   if (!warnEl) return;
@@ -712,7 +735,7 @@ function setInvalid(inp: HTMLInputElement, bad: boolean, warn?: string, onUseAny
   if (!bad) return;
   warnEl.append(document.createTextNode(warn ?? "Check this reading."));
   if (onUseAnyway) {
-    const chip = h("button", { type: "button", class: "use-anyway" }, "Use anyway");
+    const chip = h("button", { type: "button", class: "use-anyway" }, useLabel);
     chip.addEventListener("click", (e) => { e.preventDefault(); onUseAnyway(); });
     warnEl.append(chip);
   }
