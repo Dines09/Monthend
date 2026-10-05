@@ -92,9 +92,28 @@ self.addEventListener("activate", (e) => {
   })());
 });
 
-// Let the page ask the worker to apply a waiting update on demand.
+// Refill any asset missing from the cache. The cache can be emptied behind our
+// back — the browser evicting storage, or another app on this same origin
+// (dines09.github.io hosts several, and CacheStorage is shared per origin)
+// clearing caches. Without this the app stayed broken offline until the next
+// release, needing a connection on every launch.
+async function heal() {
+  const c = await caches.open(CACHE);
+  await Promise.all(ASSETS.map(async (url) => {
+    if (await c.match(url)) return;
+    try {
+      const resp = await fetch(url, { cache: "reload" });
+      if (resp && resp.ok) await c.put(url, resp);
+    } catch (_) { /* offline — try again next launch */ }
+  }));
+  const idx = await c.match(INDEX);
+  if (idx && !(await c.match("./"))) await c.put("./", idx.clone());
+}
+
+// Let the page ask the worker to apply a waiting update, or to heal the cache.
 self.addEventListener("message", (e) => {
   if (e.data === "skip-waiting") self.skipWaiting();
+  else if (e.data === "heal") e.waitUntil(heal());
 });
 
 self.addEventListener("fetch", (e) => {
@@ -111,8 +130,13 @@ self.addEventListener("fetch", (e) => {
       const cached = (await caches.match(INDEX, { ignoreSearch: true }))
         || (await caches.match("./", { ignoreSearch: true }));
       if (cached) return cached;
-      try { return await fetch(req); }
-      catch (_) {
+      try {
+        // Cache was cleared: serve the page and rebuild the offline copy now,
+        // so the next launch works without a connection again.
+        const resp = await fetch(req);
+        e.waitUntil(heal().catch(() => {}));
+        return resp;
+      } catch (_) {
         return new Response(
           "<!doctype html><meta charset=utf-8><title>Month End</title>" +
           "<body style='font:16px system-ui;padding:2rem;text-align:center'>" +

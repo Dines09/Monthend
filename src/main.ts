@@ -156,6 +156,14 @@ if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", async () => {
     try {
       const reg = await navigator.serviceWorker.register("./sw.js");
+      // Keep the offline copy complete: if anything was cleared from the
+      // cache, refill it now while there is a connection (local check only,
+      // no network when the cache is intact).
+      navigator.serviceWorker.ready.then((r) => {
+        if (navigator.onLine) r.active?.postMessage("heal");
+      }).catch(() => {});
+      // Ask the browser not to evict the records or the offline cache.
+      navigator.storage?.persist?.().catch(() => {});
       // Update checks are deliberately NOT run at boot. The app is used at sea
       // with no connection for days: an update check on every launch is a
       // request that can only fail, and while it is failing the browser has
