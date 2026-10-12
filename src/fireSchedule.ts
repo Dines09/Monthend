@@ -19,11 +19,16 @@ import { panelInfo, type PanelInfo } from "./firePanel";
 /**
  * Fifteen detectors on the record sheet (rows 141–149, 159–160, 169–172 — the
  * ones with no Sr.No. in column A) were left out of the first import; they are
- * marked `addedIn` in the seed. They are scheduled only on Saturdays from this
- * date on, on top of the roster everything else already had, so no detector
- * that was already scheduled moves to a different Saturday mid-quarter.
+ * marked `addedIn` in the seed.
+ *
+ * In the quarter they were added (and any before it) the rest of the roster is
+ * dealt exactly as it always was — tests already ticked stay on their Saturday —
+ * and the added ones are then spread evenly over every Saturday of the quarter,
+ * past ones included, so overdue ones can be picked up on the next round.
+ * From the first quarter that starts on/after MERGED_FROM_YM, nothing has been
+ * ticked yet, so all detectors are planned together as one even roster.
  */
-export const ADDED_FROM = "2026-10-17";
+export const MERGED_FROM_YM = "2027-01";
 
 /** Blank template rows (no tag, no location) are placeholders, not detectors. */
 export function isPlaceholder(d: { id?: string | null; location?: string | null }): boolean {
@@ -276,7 +281,7 @@ export function buildQuarterPlan(ymStr: string): QuarterPlan {
   };
 
   // The original register is dealt exactly as it always was; the late
-  // additions go on afterwards (see ADDED_FROM).
+  // additions go on afterwards (see MERGED_FROM_YM).
   const original = masters.fireDetectors.filter((d: any) => !d.addedIn).map(toScheduled);
   const late = masters.fireDetectors.filter((d: any) => d.addedIn).map(toScheduled);
 
@@ -309,11 +314,16 @@ export function buildQuarterPlan(ymStr: string): QuarterPlan {
         cursor = (best + 1) % N;
       }
     };
-    deal(interleave(original), () => true);
-    // Late additions only on Saturdays from ADDED_FROM on; a quarter that ended
-    // before then has none, so there they spread over the whole quarter.
-    const open = saturdays.some((s) => s >= ADDED_FROM);
-    deal(interleave(late), (i) => !open || saturdays[i] >= ADDED_FROM);
+    if (q.startYm >= MERGED_FROM_YM) {
+      // Placeholders aren't detectors; leaving them out keeps the load even.
+      const all = [...original, ...late]
+        .filter((d) => !isPlaceholder(masters.fireDetectors.find((x: any) => x.sheet === d.sheet && x.row === d.row)))
+        .sort((a, b) => Number(a.battery) - Number(b.battery) || a.row - b.row);
+      deal(interleave(all), () => true);
+    } else {
+      deal(interleave(original), () => true);
+      deal(interleave(late), () => true);
+    }
 
     // Blank template rows stay in the deal above (so nothing else shifts) but
     // are not detectors, so they never appear on a round.

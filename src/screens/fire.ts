@@ -381,6 +381,9 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
   // Free-text filter for the "All" view: matches the tag, the location, or the
   // area name, so "S 51", "51", "boiler" and "e/r floor" all find something.
   let query = "";
+  // "All" view filter: only detectors still to be checked on the fire panel.
+  let onlyCheck = false;
+  const needsCheck = (d: ScheduledDet) => d.panel.verify && !d.panel.confirmed;
   const searchInput = h("input", {
     type: "search", class: "det-search", placeholder: "Search name, number or location…",
     "aria-label": "Search detectors",
@@ -445,6 +448,18 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
             h("div", { class: "fh-kicker" }, `${qLabel} · FULL CYCLE`),
             h("span", { class: `chip ${tested.size >= plan.total ? "done" : "due"}` }, `${tested.size}/${plan.total}`)),
           h("div", { class: "fh-sub" }, "Every detector is scheduled once across the quarter's Saturdays. Tap to mark tested once its Saturday has come · long-press to edit number or location."),
+          // Detectors whose loop / zone / address still need reading off the panel.
+          (() => {
+            const n = allDets.filter(needsCheck).length;
+            if (!n && !onlyCheck) return null;
+            return h("button", {
+              type: "button", class: `check-filter${onlyCheck ? " on" : ""}`,
+              onClick: () => { onlyCheck = !onlyCheck; paint(); },
+            },
+              h("span", { class: "cfl-ic" }, onlyCheck ? "✕" : "⚠"),
+              h("span", {}, onlyCheck ? "Show all detectors" : `${n} to check on the fire panel`),
+              onlyCheck ? null : h("span", { class: "cfl-sub" }, "Long-press each one to enter loop · zone · address"));
+          })(),
           isolationWarning(),
           h("div", { class: "fh-carry" }, "Full cycle needs"),
           testerSummary(allDets))
@@ -502,7 +517,7 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
         renderZoned(listEl, sessionDets, tested, () => recordDate, false);
       }
     } else {
-      const shown = allDets.filter((d) => matches(d) !== null);
+      const shown = allDets.filter((d) => matches(d) !== null && (!onlyCheck || needsCheck(d)));
       searchCount.textContent = query.trim()
         ? `${shown.length} of ${allDets.length} detectors match “${query.trim()}”`
         : "";
