@@ -5,8 +5,10 @@ import { periodHead, bindHeadGestures } from "./periodhead";
 import { matchRow, highlight, type SearchField } from "../search";
 import { masters, detKey as keyOf } from "../seed";
 import { saveFireEdit, originalDet, isEdited } from "../fireEdits";
+import { panelInfo, panelLabel, type PanelInfo } from "../firePanel";
 import {
   currentFireSession,
+  detPanel,
   sortByWalk,
   kindCounts,
   detKind,
@@ -24,6 +26,24 @@ import {
 function ddMon(iso: string): string {
   const d = parseIso(iso);
   return `${String(d.getDate()).padStart(2, "0")} ${MONTHS_SHORT[d.getMonth()].toUpperCase()}`;
+}
+
+/**
+ * Loop / zone / address on the fire-alarm panel, plus the text the panel's LCD
+ * shows — so the alarm that comes up can be matched to the detector being
+ * tested. Detectors the manual can't place, or where it disagrees with the
+ * record sheet, say so and ask to be checked on the panel.
+ */
+function panelLine(p: PanelInfo, q = ""): HTMLElement {
+  const hl = (t: string) => (q ? highlight(t, q) : t);
+  if (p.standalone) return h("div", { class: "det-panel standalone" }, panelLabel(p));
+  return h("div", { class: `det-panel${p.verify && !p.confirmed ? " verify" : ""}` },
+    h("span", { class: "dp-addr" }, hl(panelLabel(p))),
+    p.text ? h("span", { class: "dp-text" }, hl(`Panel: ${p.text}`)) : null,
+    p.confirmed
+      ? h("span", { class: "dp-flag ok" }, "✓ Checked on panel")
+      : p.verify ? h("span", { class: "dp-flag" }, "⚠ Check on panel") : null,
+    p.note && !p.confirmed ? h("div", { class: "dp-note" }, p.note) : null);
 }
 
 /**
@@ -121,6 +141,7 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
     for (const t of tests) {
       const m = t.testedDate.slice(0, 7);
       if (m < plan.startYm || m > plan.endYm) continue;
+      if (!plan.satOfDet.has(t.detKey)) continue; // not on the register (blank template row)
       const cur = map.get(t.detKey);
       if (!cur || t.testedDate > cur) map.set(t.detKey, t.testedDate);
     }
@@ -177,6 +198,28 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
     };
     idIn.addEventListener("input", syncKind);
 
+    // Panel loop / zone / address. Pre-filled from the manual; once the user has
+    // read them off the panel and ticks "checked", they are kept as entered.
+    const cur = detPanel(raw);
+    const manual = panelInfo(raw);
+    const numIn = (v: number | null, label: string) => h("input", {
+      type: "number", inputmode: "numeric", min: 0, value: v ?? "", placeholder: "?", "aria-label": label,
+    }) as HTMLInputElement;
+    const loopIn = numIn(cur.loop, "Loop");
+    const zoneIn = numIn(cur.zone, "Zone");
+    const addrIn = numIn(cur.addr, "Address");
+    const checkedIn = h("input", { type: "checkbox" }) as HTMLInputElement;
+    checkedIn.checked = cur.confirmed;
+    for (const el of [loopIn, zoneIn, addrIn]) el.addEventListener("input", () => { checkedIn.checked = true; });
+    const panelSection = d.battery ? null : h("div", { class: "de-panel" },
+      h("div", { class: "lab" }, "Fire panel"),
+      h("div", { class: "de-panel-grid" },
+        h("label", {}, h("span", {}, "Loop"), loopIn),
+        h("label", {}, h("span", {}, "Zone"), zoneIn),
+        h("label", {}, h("span", {}, "Address"), addrIn)),
+      manual.note ? h("div", { class: "de-panel-note" }, manual.note) : null,
+      h("label", { class: "de-panel-check" }, checkedIn, h("span", {}, "I have checked these on the panel")));
+
     let busy = false;
     const close = () => { back.classList.remove("show"); setTimeout(() => back.remove(), 220); };
     const save = async () => {
@@ -203,10 +246,15 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
         busy = false;
         if (!ok) return;
       }
-      await saveFireEdit(d.detKey, { id, location });
+      const n = (el: HTMLInputElement) => (el.value.trim() === "" ? undefined : Number(el.value));
+      const panel = checkedIn.checked && [loopIn, zoneIn, addrIn].some((el) => el.value.trim() !== "")
+        ? { loop: n(loopIn), zone: n(zoneIn), addr: n(addrIn) }
+        : null;
+      await saveFireEdit(d.detKey, { id, location, panel: d.battery ? undefined : panel });
       // Refresh the scheduled copy in place so the list redraws without a reload.
       d.id = raw.id || `#${raw.sn}`;
       d.location = raw.location || "";
+      d.panel = detPanel(raw);
       d.kind = detKind(d.id, d.location);
       d.area = detArea(d.location);
       const sat = plan.satOfDet.get(d.detKey);
@@ -225,6 +273,7 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
           h("div", { class: "de-sub" }, `${d.battery ? "Battery sheet" : "Main sheet"} · row ${d.row} · `, kindChip))),
       h("label", { class: "field" }, h("span", { class: "lab" }, "Detector number"), idIn),
       h("label", { class: "field" }, h("span", { class: "lab" }, "Location"), locIn),
+      panelSection,
       edited
         ? h("div", { class: "de-orig" },
             h("span", {}, "Original: ", h("b", {}, orig.id || "—"), ` · ${orig.location || "—"}`),
@@ -264,6 +313,7 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
           h("span", { class: "id" }, q ? highlight(d.id || "—", q) : (d.id || "—")),
           h("span", { class: `kind k-${d.kind}` }, KIND_META[d.kind].short)),
         h("div", { class: "loc" }, q ? highlight(d.location || "—", q) : (d.location || "—")),
+        panelLine(d.panel, q),
         // SC/SCI/SC1 are interface units, not smoke detectors — no tester is
         // used on them, so the row says plainly what the job actually is.
         d.kind === "interface"
@@ -294,8 +344,11 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
       if (!headEl || !group.length) return;
       const counts = kindCounts(group);
       const kinds = (Object.keys(KIND_META) as DetKind[]).filter((k) => counts[k] > 0);
+      // Panel zones this space covers, e.g. "Zone 11 · 15".
+      const zones = [...new Set(group.map((d) => d.panel.zone).filter((z): z is number => z != null))].sort((a, b) => a - b);
       headEl.append(
         h("span", { class: "zh-count" }, String(group.length)),
+        ...(zones.length ? [h("span", { class: "zh-zones" }, `Zone ${zones.join(" · ")}`)] : []),
         h("span", { class: "zh-kinds" },
           ...kinds.map((k) => h("span", { class: `kind k-${k}` }, `${counts[k]} ${KIND_META[k].short}`)))
       );
@@ -343,6 +396,7 @@ export async function renderFire(_p: Record<string, string>, mount: HTMLElement)
       { label: "Location", text: d.location || "" },
       { label: "Area", text: AREA_LABEL[d.area] },
       { label: "Type", text: KIND_META[d.kind].label },
+      { label: "Panel", text: `${panelLabel(d.panel)}${d.panel.text ? ` ${d.panel.text}` : ""}` },
     ];
   }
 

@@ -39,6 +39,27 @@ export function detKey(d: { sheet: string; row: number }) {
   return `${d.sheet}:${d.row}`;
 }
 
+/**
+ * Test history for detectors added to the register after a phone was first
+ * seeded (`addedIn` in the seed — the rows the first import skipped). Adds
+ * their last test date from the original sheet, exactly as first-time seeding
+ * does for every other detector, so "Date last tested" is filled in on export.
+ *
+ * Add-only: an event is written only when that detector has no test on that
+ * date already. Nothing existing is changed or removed. Runs once per phone.
+ */
+export async function ensureAddedFireHistory() {
+  if (await getSetting<boolean>("fireAddedHistory", false)) return;
+  for (const d of seed.firedetector.detectors as any[]) {
+    if (!d.addedIn || !d.testedThisQ) continue;
+    const key = detKey(d);
+    const have = await db.fireTest.where("detKey").equals(key).toArray();
+    if (have.some((t) => t.testedDate === d.testedThisQ)) continue;
+    await db.fireTest.add({ detKey: key, testedDate: d.testedThisQ, remarks: d.remarks ?? "satisfactory" });
+  }
+  await setSetting("fireAddedHistory", true);
+}
+
 /** One-time seeding of historic Jan–Jun 2026 data into IndexedDB. */
 export async function ensureSeeded() {
   const done = await getSetting<boolean>("seeded", false);

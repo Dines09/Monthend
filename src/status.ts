@@ -3,6 +3,7 @@ import { db } from "./db";
 import { h } from "./ui";
 import { masters } from "./seed";
 import { ym, saturdaysInMonth, ymParts, quarterWindow } from "./util";
+import { realDetectors } from "./fireSchedule";
 
 export interface RecStatus {
   count: number; // entries present for this month
@@ -55,8 +56,10 @@ export async function fireStatus(ymStr: string): Promise<RecStatus> {
     const m = t.testedDate.slice(0, 7);
     return m >= q.startYm && m <= q.endYm;
   });
-  const tested = new Set(inQ.map((t) => t.detKey));
-  return summarize(tested.size, masters.fireDetectors.length, "detectors");
+  // Out of the real detectors only — blank template rows are not counted.
+  const real = new Set(realDetectors().map((d: any) => `${d.sheet}:${d.row}`));
+  const tested = new Set(inQ.map((t) => t.detKey).filter((k) => real.has(k)));
+  return summarize(tested.size, real.size, "detectors");
 }
 
 /**

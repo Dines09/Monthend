@@ -13,6 +13,27 @@
 //     they recur on more Saturdays — and occasionally 2 on one day).
 import { masters } from "./seed";
 import { quarterWindow, saturdaysInMonth, ymParts } from "./util";
+import { fireEdit } from "./fireEdits";
+import { panelInfo, type PanelInfo } from "./firePanel";
+
+/**
+ * Fifteen detectors on the record sheet (rows 141–149, 159–160, 169–172 — the
+ * ones with no Sr.No. in column A) were left out of the first import; they are
+ * marked `addedIn` in the seed. They are scheduled only on Saturdays from this
+ * date on, on top of the roster everything else already had, so no detector
+ * that was already scheduled moves to a different Saturday mid-quarter.
+ */
+export const ADDED_FROM = "2026-10-17";
+
+/** Blank template rows (no tag, no location) are placeholders, not detectors. */
+export function isPlaceholder(d: { id?: string | null; location?: string | null }): boolean {
+  return !(d.id ?? "").trim() && !(d.location ?? "").trim();
+}
+
+/** Real detectors on the register — what every count and total is out of. */
+export function realDetectors(): any[] {
+  return masters.fireDetectors.filter((d: any) => !isPlaceholder(d));
+}
 
 export interface ScheduledDet {
   detKey: string; // `${sheet}:${row}` — matches FireTest.detKey
@@ -25,6 +46,12 @@ export interface ScheduledDet {
   dtype: string | null;
   kind: DetKind; // what it is, derived from the tag — decides the tester needed
   area: ShipArea; // physical area, derived from the location text
+  panel: PanelInfo; // loop / zone / address on the fire-alarm panel
+}
+
+/** Panel info for a register entry, with any user-confirmed values applied. */
+export function detPanel(d: { sheet: string; row: number; zone: number; id?: string | null }): PanelInfo {
+  return panelInfo(d, fireEdit(`${d.sheet}:${d.row}`));
 }
 
 // ---- device kind -------------------------------------------------------
@@ -213,11 +240,10 @@ export function buildQuarterPlan(ymStr: string): QuarterPlan {
   const saturdays = quarterSaturdays(ymStr);
   const N = saturdays.length;
 
-  const groups = new Map<string, ScheduledDet[]>();
-  for (const d of masters.fireDetectors) {
+  const toScheduled = (d: any): ScheduledDet => {
     const id = d.id || `#${d.sn}`;
     const location = d.location || "";
-    const sd: ScheduledDet = {
+    return {
       detKey: `${d.sheet}:${d.row}`,
       sheet: d.sheet,
       row: d.row,
@@ -228,51 +254,79 @@ export function buildQuarterPlan(ymStr: string): QuarterPlan {
       dtype: d.dtype ?? null,
       kind: detKind(id, location),
       area: detArea(location),
+      panel: detPanel(d),
     };
-    const k = groupKey(d);
-    const arr = groups.get(k);
-    if (arr) arr.push(sd);
-    else groups.set(k, [sd]);
-  }
-
-  const bySat = new Map<string, ScheduledDet[]>();
-  const satOfDet = new Map<string, string>();
-  for (const s of saturdays) bySat.set(s, []);
-
-  if (N > 0) {
-    // Zones largest-first (stable) so heavy zones lead each interleave pass.
+  };
+  /** Zone-interleaved sequence: largest zone first (stable), pass p = detector #p of each zone. */
+  const interleave = (dets: ScheduledDet[]): ScheduledDet[] => {
+    const groups = new Map<string, ScheduledDet[]>();
+    for (const sd of dets) {
+      const k = groupKey(sd);
+      const arr = groups.get(k);
+      if (arr) arr.push(sd);
+      else groups.set(k, [sd]);
+    }
     const ordered = [...groups.entries()].sort(
       (a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0])
     );
     const maxLen = ordered.reduce((m, [, a]) => Math.max(m, a.length), 0);
     const flat: ScheduledDet[] = [];
     for (let p = 0; p < maxLen; p++) for (const [, arr] of ordered) if (p < arr.length) flat.push(arr[p]);
+    return flat;
+  };
 
+  // The original register is dealt exactly as it always was; the late
+  // additions go on afterwards (see ADDED_FROM).
+  const original = masters.fireDetectors.filter((d: any) => !d.addedIn).map(toScheduled);
+  const late = masters.fireDetectors.filter((d: any) => d.addedIn).map(toScheduled);
+
+  const bySat = new Map<string, ScheduledDet[]>();
+  const satOfDet = new Map<string, string>();
+  for (const s of saturdays) bySat.set(s, []);
+
+  if (N > 0) {
     const load = new Array(N).fill(0);
     const zoneCount = Array.from({ length: N }, () => new Map<string, number>());
     let cursor = 0;
-    for (const d of flat) {
-      const zk = groupKey(d);
-      let best = -1, bLoad = 0, bZone = 0, bOff = 0;
-      for (let off = 0; off < N; off++) {
-        const i = (cursor + off) % N;
-        const l = load[i];
-        const z = zoneCount[i].get(zk) ?? 0;
-        if (best < 0 || l < bLoad || (l === bLoad && z < bZone) || (l === bLoad && z === bZone && off < bOff)) {
-          best = i; bLoad = l; bZone = z; bOff = off;
+    const deal = (flat: ScheduledDet[], allowed: (i: number) => boolean) => {
+      for (const d of flat) {
+        const zk = groupKey(d);
+        let best = -1, bLoad = 0, bZone = 0, bOff = 0;
+        for (let off = 0; off < N; off++) {
+          const i = (cursor + off) % N;
+          if (!allowed(i)) continue;
+          const l = load[i];
+          const z = zoneCount[i].get(zk) ?? 0;
+          if (best < 0 || l < bLoad || (l === bLoad && z < bZone) || (l === bLoad && z === bZone && off < bOff)) {
+            best = i; bLoad = l; bZone = z; bOff = off;
+          }
         }
+        load[best]++;
+        zoneCount[best].set(zk, (zoneCount[best].get(zk) ?? 0) + 1);
+        const sat = saturdays[best];
+        bySat.get(sat)!.push(d);
+        satOfDet.set(d.detKey, sat);
+        cursor = (best + 1) % N;
       }
-      load[best]++;
-      zoneCount[best].set(zk, (zoneCount[best].get(zk) ?? 0) + 1);
-      const sat = saturdays[best];
-      bySat.get(sat)!.push(d);
-      satOfDet.set(d.detKey, sat);
-      cursor = (best + 1) % N;
-    }
+    };
+    deal(interleave(original), () => true);
+    // Late additions only on Saturdays from ADDED_FROM on; a quarter that ended
+    // before then has none, so there they spread over the whole quarter.
+    const open = saturdays.some((s) => s >= ADDED_FROM);
+    deal(interleave(late), (i) => !open || saturdays[i] >= ADDED_FROM);
 
-    // Tidy each Saturday's list into the physical walk order (E/R floor first,
-    // then upward through the decks) so the engineer works one space at a time.
-    for (const s of saturdays) bySat.set(s, sortByWalk(bySat.get(s)!));
+    // Blank template rows stay in the deal above (so nothing else shifts) but
+    // are not detectors, so they never appear on a round.
+    for (const s of saturdays) {
+      const kept = bySat.get(s)!.filter((d) => {
+        const raw = masters.fireDetectors.find((x: any) => x.sheet === d.sheet && x.row === d.row);
+        if (raw && isPlaceholder(raw)) { satOfDet.delete(d.detKey); return false; }
+        return true;
+      });
+      // Tidy each Saturday's list into the physical walk order (E/R floor first,
+      // then upward through the decks) so the engineer works one space at a time.
+      bySat.set(s, sortByWalk(kept));
+    }
   }
 
   return {
@@ -283,7 +337,7 @@ export function buildQuarterPlan(ymStr: string): QuarterPlan {
     saturdays,
     bySat,
     satOfDet,
-    total: masters.fireDetectors.length,
+    total: realDetectors().length,
   };
 }
 

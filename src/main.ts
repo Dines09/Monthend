@@ -2,7 +2,7 @@ import "./style.css";
 import { h, initRouter, route, navigate, initTheme } from "./ui";
 import { tapFeedback } from "./feedback";
 import { ICON } from "./icons";
-import { ensureSeeded } from "./seed";
+import { ensureSeeded, ensureAddedFireHistory } from "./seed";
 import { maybeAutoBackup } from "./backup";
 import { loadFireEdits } from "./fireEdits";
 import { renderToday } from "./screens/today";
@@ -131,6 +131,8 @@ async function boot() {
   );
 
   await ensureSeeded();
+  // Last-test dates for detectors the first import missed (add-only, once).
+  await ensureAddedFireHistory();
   // Corrected detector numbers / locations, before any screen reads the list.
   await loadFireEdits();
 
